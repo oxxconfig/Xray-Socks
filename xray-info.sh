@@ -100,7 +100,7 @@ if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; 
         if [ -n "$PUBKEY" ] && [ "$PUBKEY" != "null" ]; then
             VLESS_LINK="${VLESS_LINK}&pbk=${PUBKEY}"
         fi
-        VLESS_LINK="${VLESS_LINK}#oxx_VLESS_${IP}"
+        VLESS_LINK="${VLESS_LINK}#🇺🇸"
         
         # 打印明文链接
         echo -e " 🔗 节点链接 :\n ${GREEN}${VLESS_LINK}${NC}\n"
