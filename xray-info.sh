@@ -1,3 +1,4 @@
+cat << 'EOF' > /usr/local/bin/xray-info
 #!/usr/bin/env bash
 # 定义颜色
 GREEN='\033[32m'
@@ -15,7 +16,7 @@ fi
 IP=$(curl -sS4 --connect-timeout 3 --retry 1 ip.sb || curl -sS4 --connect-timeout 3 --retry 1 ifconfig.me || echo "见VPS公网IP")
 
 echo -e "\n${BLUE}==================================================${NC}"
-echo -e "       ${GREEN}🌟 Xray 全套节点信息一键看板 V4.0 🌟${NC}"
+echo -e "       ${GREEN}🌟 Xray 全套节点信息一键看板 V4.1 🌟${NC}"
 echo -e "${BLUE}==================================================${NC}"
 
 # 定位实际的配置文件
@@ -63,34 +64,45 @@ if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; 
     SNI=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.realitySettings.serverNames[0]' "$XRAY_CONFIG" 2>/dev/null)
     SID=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.realitySettings.shortIds[]' "$XRAY_CONFIG" 2>/dev/null | grep -v '^$' | head -n 1)
     
-    # 抓取公钥的多重保底路径
+    # ------------------ 【公钥 (pbk) 抓取与计算逻辑】 ------------------
     PUBKEY=""
+    # 路径 A: 尝试从脚本配置文件读取
     if [ -f "/usr/local/xray-script/config/script_config.json" ]; then
-        PUBKEY=$(jq -r '.xray.public_key' /usr/local/xray-script/config/script_config.json 2>/dev/null)
+        PUBKEY=$(jq -r '.xray.public_key // .public_key' /usr/local/xray-script/config/script_config.json 2>/dev/null)
     fi
+    # 路径 B: 尝试从主目录缓存文件读取
     if [ -z "$PUBKEY" ] || [ "$PUBKEY" = "null" ]; then
-        PUBKEY=$(jq -r '.nginx.public_key' "$HOME/.xray-script/config.json" 2>/dev/null)
+        PUBKEY=$(jq -r '.nginx.public_key // .xray.public_key // .public_key' "$HOME/.xray-script/config.json" 2>/dev/null)
     fi
+    # 路径 C: 最终保底大招——利用配置文件里的 privateKey 用 xray 命令现场推算对应的 public_key
     if [ -z "$PUBKEY" ] || [ "$PUBKEY" = "null" ]; then
-        PUBKEY=$(jq -r '.public_key' "$HOME/.xray-script/config.json" 2>/dev/null)
+        PRIV_KEY=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.realitySettings.privateKey' "$XRAY_CONFIG" 2>/dev/null)
+        if [ -n "$PRIV_KEY" ] && [ "$PRIV_KEY" != "null" ] && command -v xray &>/dev/null; then
+            PUBKEY=$(xray x25519 -i "$PRIV_KEY" 2>/dev/null | grep -i "Public key" | awk '{print $3}')
+        fi
     fi
+    # ------------------------------------------------------------------
 
-    # 变量默认值容错
+    # 变量默认值容错处理
     if [ "$SNI" = "null" ] || [ -z "$SNI" ]; then SNI="www.leercapitulo.co"; fi
     if [ "$SID" = "null" ] || [ -z "$SID" ]; then SID="01"; fi
     if [ "$FLOW" = "null" ] || [ -z "$FLOW" ]; then FLOW="xtls-rprx-vision"; fi
     if [ "$NET" = "null" ] || [ -z "$NET" ]; then NET="tcp"; fi
     if [ "$SEC" = "null" ] || [ -z "$SEC" ]; then SEC="reality"; fi
 
+    # 补全客户端指纹和伪装 Path 参数
+    FP="chrome"
+    SPX="%2F"
+
     if [ -n "$UUID" ] && [ "$UUID" != "null" ]; then
-        # 组装链接
-        VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=${NET}&security=${SEC}&flow=${FLOW}&sni=${SNI}&sid=${SID}"
+        # 组装完整的 VLESS 链接
+        VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=${NET}&security=${SEC}&flow=${FLOW}&sni=${SNI}&sid=${SID}&fp=${FP}&spx=${SPX}"
         if [ -n "$PUBKEY" ] && [ "$PUBKEY" != "null" ]; then
             VLESS_LINK="${VLESS_LINK}&pbk=${PUBKEY}"
         fi
         VLESS_LINK="${VLESS_LINK}#oxx_VLESS_${IP}"
         
-        # 打印明文
+        # 打印明文链接
         echo -e " 🔗 节点链接 :\n ${GREEN}${VLESS_LINK}${NC}\n"
         
         # 4. 现场渲染终端二维码
@@ -107,3 +119,6 @@ else
 fi
 
 echo -e "${BLUE}==================================================${NC}\n"
+EOF
+
+chmod +x /usr/local/bin/xray-info
