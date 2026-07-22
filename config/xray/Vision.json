@@ -98,6 +98,29 @@
           "quic"
         ]
       }
+    },
+    {
+      "tag": "SOCKS5-INBOUND",
+      "listen": "0.0.0.0",
+      "port": 1080,
+      "protocol": "socks",
+      "settings": {
+        "auth": "password",
+        "accounts": [
+          {
+            "user": "TC",
+            "pass": "Tcnet@123456"
+          }
+        ],
+        "udp": true
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls"
+        ]
+      }
     }
   ],
   "outbounds": [
