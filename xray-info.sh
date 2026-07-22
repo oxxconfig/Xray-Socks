@@ -1,4 +1,3 @@
-cat << 'EOF' > /usr/local/bin/xray-info
 #!/usr/bin/env bash
 # 定义颜色
 GREEN='\033[32m'
@@ -7,7 +6,7 @@ BLUE='\033[36m'
 RED='\033[31m'
 NC='\033[0m'
 
-# 1. 自动确保系统安装了 jq 和 qrencode (生成二维码必备)
+# 1. 自动确保系统安装了 jq 和 qrencode
 if ! command -v qrencode &>/dev/null; then
     apt-get update && apt-get install -y qrencode || yum install -y qrencode
 fi
@@ -21,7 +20,12 @@ echo -e "${BLUE}==================================================${NC}"
 
 # 定位实际的配置文件
 XRAY_CONFIG=""
-PATHS=("/usr/local/etc/xray/config.json" "/usr/local/xray-script/config/xray/config.json" "/etc/xray/config.json" "$HOME/.xray-script/config.json")
+PATHS=(
+    "/usr/local/etc/xray/config.json"
+    "/usr/local/xray-script/config/xray/config.json"
+    "/etc/xray/config.json"
+    "$HOME/.xray-script/config.json"
+)
 for p in "${PATHS[@]}"; do [ -f "$p" ] && XRAY_CONFIG="$p" && break; done
 
 if [ -z "$XRAY_CONFIG" ]; then
@@ -49,7 +53,7 @@ if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; 
     echo -e "${BLUE}--------------------------------------------------${NC}"
     echo -e "${YELLOW}[ 🚀 核心 VLESS-REALITY 订阅链接 ]${NC}"
 
-    # 3. 现场全手工拼装 VLESS 核心参数 (100% 脱离原脚本，绝不卡回车)
+    # 3. 现场全手工拼装 VLESS 核心参数
     UUID=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .settings.clients[0].id' "$XRAY_CONFIG" 2>/dev/null)
     PORT=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .port' "$XRAY_CONFIG" 2>/dev/null)
     FLOW=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .settings.clients[0].flow' "$XRAY_CONFIG" 2>/dev/null)
@@ -59,7 +63,7 @@ if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; 
     SNI=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.realitySettings.serverNames[0]' "$XRAY_CONFIG" 2>/dev/null)
     SID=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.realitySettings.shortIds[]' "$XRAY_CONFIG" 2>/dev/null | grep -v '^$' | head -n 1)
     
-    # 尝试抓取公钥
+    # 抓取公钥的多重保底路径
     PUBKEY=""
     if [ -f "/usr/local/xray-script/config/script_config.json" ]; then
         PUBKEY=$(jq -r '.xray.public_key' /usr/local/xray-script/config/script_config.json 2>/dev/null)
@@ -67,12 +71,16 @@ if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; 
     if [ -z "$PUBKEY" ] || [ "$PUBKEY" = "null" ]; then
         PUBKEY=$(jq -r '.nginx.public_key' "$HOME/.xray-script/config.json" 2>/dev/null)
     fi
+    if [ -z "$PUBKEY" ] || [ "$PUBKEY" = "null" ]; then
+        PUBKEY=$(jq -r '.public_key' "$HOME/.xray-script/config.json" 2>/dev/null)
+    fi
 
-    [ "$SNI" = "null" ] || [ -z "$SNI" ] && SNI="www.leercapitulo.co"
-    [ "$SID" = "null" ] || [ -z "$SID" ] && SID="01"
-    [ "$FLOW" = "null" ] || [ -z "$FLOW" ] && FLOW="xtls-rprx-vision"
-    [ "$NET" = "null" ] || [ -z "$NET" ] && NET="tcp"
-    [ "$SEC" = "null" ] || [ -z "$SEC" ] && SEC="reality"
+    # 变量默认值容错
+    if [ "$SNI" = "null" ] || [ -z "$SNI" ]; then SNI="www.leercapitulo.co"; fi
+    if [ "$SID" = "null" ] || [ -z "$SID" ]; then SID="01"; fi
+    if [ "$FLOW" = "null" ] || [ -z "$FLOW" ]; then FLOW="xtls-rprx-vision"; fi
+    if [ "$NET" = "null" ] || [ -z "$NET" ]; then NET="tcp"; fi
+    if [ "$SEC" = "null" ] || [ -z "$SEC" ]; then SEC="reality"; fi
 
     if [ -n "$UUID" ] && [ "$UUID" != "null" ]; then
         # 组装链接
@@ -85,7 +93,7 @@ if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; 
         # 打印明文
         echo -e " 🔗 节点链接 :\n ${GREEN}${VLESS_LINK}${NC}\n"
         
-        # 4. 调用本地 qrencode 强行现场渲染终端二维码
+        # 4. 现场渲染终端二维码
         if command -v qrencode &>/dev/null; then
             echo -e "${YELLOW}[ 📱 手机扫码专用二维码 ]${NC}"
             qrencode -t ansiutf8 "${VLESS_LINK}"
@@ -95,10 +103,7 @@ if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; 
     fi
 
 else
-    echo -e "${RED}[严重错误] 环境损坏，无法解析。${NC}"
+    echo -e "${RED}[严重错误] 未找到配置文件或系统缺少 jq 命令，无法解析。${NC}"
 fi
 
 echo -e "${BLUE}==================================================${NC}\n"
-EOF
-
-chmod +x /usr/local/bin/xray-info
