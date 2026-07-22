@@ -250,6 +250,7 @@ function main() {
     json_lang=$(jq --arg language "zh" '.language = $language' "${SCRIPT_CONFIG_PATH}" 2>/dev/null)
     [[ -n "${json_lang}" ]] && echo "${json_lang}" >"${SCRIPT_CONFIG_PATH}"
 
+    # 配置全局 xray 快捷控制命令
     if [ -f "${CORE_DIR}/main.sh" ]; then
         local target_rcs=("${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile")
         for rc in "${target_rcs[@]}"; do
@@ -258,20 +259,27 @@ function main() {
                 echo "alias xray='bash ${CORE_DIR}/main.sh'" >> "${rc}"
             fi
         done
+        
+        # 写入全局 profile 防止登录后被二进制 xray 覆盖
+        echo "alias xray='bash ${CORE_DIR}/main.sh'" > /etc/profile.d/xray.sh
+        chmod +x /etc/profile.d/xray.sh
     fi
 
     echo -e "${GREEN}[部署完成]${NC} 前置依赖与系统优化已就绪，正在唤起 Xray 主内核业务脚本..."
     echo "--------------------------------------------------------"
     
-    # 1. 唤起 Xray 主内核安装脚本 (去掉 exec，使其运行完毕后能回到本脚本)
-    bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}"
+    # 1. 隔离标准输入唤起安装，防止卡在 STDIN 监听
+    bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}" </dev/null
 
-    # 2. 部署通用全能看板工具 xray-info
+    # 2. 强制使用 systemd 平滑重启服务，脱离控制台阻塞
+    systemctl restart xray &>/dev/null || systemctl restart xray-script &>/dev/null
+
+    # 3. 部署并挂载通用看板工具 xray-info
     echo -e "\n${GREEN}[看板配置]${NC} 正在挂载 Xray 全能信息看板工具..."
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-    # 3. 安装完成后直接闪电唤起看板，打印 Socks5 + VLESS + 二维码
+    # 4. 瞬间唤起看板，打印 Socks5 + VLESS + 二维码
     if [ -x "/usr/local/bin/xray-info" ]; then
         /usr/local/bin/xray-info
     fi
