@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 批量静默部署前置脚本
+# Xray 批量静默部署前置脚本 (集成 Socks5 + VLESS 自动化看板)
 # =============================================================================
 
 # 1. 严格权限断言 (彻底废除无意义的 sudo)
 if [ "$EUID" -ne 0 ]; then
-    echo -e "\033[31m[错误] 请使用 root 用户或 sudo 运行此脚本！\033[0m"
+    echo -e "\033[31m[错误] 请使用 root 用户运行此脚本！\033[0m"
     exit 1
 fi
 
@@ -52,7 +52,6 @@ function init_env_optimization() {
     
     sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
     sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
-    sed -i '/et.core.default_qdisc/d' /etc/sysctl.conf
 
     cat << 'EOF' >> /etc/sysctl.conf
 
@@ -119,7 +118,6 @@ function install_dependencies() {
             for pkg in "${packages[@]}"; do yum install -y "${pkg}"; done
         fi
     else
-
         apt-get update -y -o Acquire::Retries=3 -o Acquire::http::Timeout=10
         
         local packages=("ca-certificates" "openssl" "curl" "wget" "git" "jq" "tzdata" "qrencode" "socat" "cron" "iproute2" "procps" "dnsutils")
@@ -134,7 +132,6 @@ function install_dependencies() {
         done
     fi
 }
-
 
 function download_github_files() {
     local target_dir="$1"
@@ -167,11 +164,13 @@ function download_github_files() {
 }
 
 function download_xray_script_files() {
+    # 优先使用当前仓库名字 Xray-Socks
+    download_github_files "$1" "https://github.com/oxxconfig/Xray-Socks/archive/refs/heads/main.tar.gz" || \
     download_github_files "$1" "https://github.com/oxxconfig/Xray/archive/refs/heads/main.tar.gz"
 }
 
 function check_xray_script_version() {
-    local script_config_github_url="https://raw.githubusercontent.com/oxxconfig/Xray/main/config.json"
+    local script_config_github_url="https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/config.json"
     local local_version remote_version
     local_version="$(jq -r '.version' "${SCRIPT_CONFIG_PATH}" 2>/dev/null || echo "0.0.0")"
     remote_version="$(curl -fsSL --connect-timeout 5 "$script_config_github_url" | jq -r '.version' 2>/dev/null || echo "0.0.0")"
@@ -183,7 +182,6 @@ function check_xray_script_version() {
         mkdir -p "${temp_dir}"
         download_xray_script_files "${temp_dir}"
         
-        # 引入安全根目录校验保护
         if [[ -n "${PROJECT_ROOT}" && "${PROJECT_ROOT}" != "/" && "${PROJECT_ROOT}" != "/root" ]]; then
             rm -rf "${PROJECT_ROOT}"
         fi
@@ -219,7 +217,7 @@ function main() {
     if [[ ! -d "${SCRIPT_CONFIG_DIR}" ]]; then mkdir -p "${SCRIPT_CONFIG_DIR}"; fi
 
     if [[ ! -f "${SCRIPT_CONFIG_PATH}" ]]; then
-        wget --timeout=10 -O "${SCRIPT_CONFIG_PATH}" https://raw.githubusercontent.com/oxxconfig/Xray/main/config.json || \
+        wget --timeout=10 -O "${SCRIPT_CONFIG_PATH}" https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/config.json || \
         echo '{"version":"2026.03.17","language":"zh","path":"/usr/local/xray-script"}' > "${SCRIPT_CONFIG_PATH}"
     fi
 
@@ -265,7 +263,18 @@ function main() {
     echo -e "${GREEN}[部署完成]${NC} 前置依赖与系统优化已就绪，正在唤起 Xray 主内核业务脚本..."
     echo "--------------------------------------------------------"
     
-    exec bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}"
+    # 1. 唤起 Xray 主内核安装脚本 (去掉 exec，使其运行完毕后能回到本脚本)
+    bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}"
+
+    # 2. 部署通用全能看板工具 xray-info
+    echo -e "\n${GREEN}[看板配置]${NC} 正在挂载 Xray 全能信息看板工具..."
+    curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
+    chmod +x /usr/local/bin/xray-info
+
+    # 3. 安装完成后直接闪电唤起看板，打印 Socks5 + VLESS + 二维码
+    if [ -x "/usr/local/bin/xray-info" ]; then
+        /usr/local/bin/xray-info
+    fi
 }
 
 main "${ORIGINAL_ARGS[@]}"
