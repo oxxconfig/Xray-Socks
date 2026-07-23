@@ -1,12 +1,21 @@
+cat << 'EOF' > /usr/local/bin/xray-info
 #!/usr/bin/env bash
-# =============================================================================
-# Xray 节点信息提取 & 看板 (格式 100% 匹配原版 main.sh)
-# =============================================================================
+# 定义颜色与样式
+GREEN='\033[1;32m'   # 加粗亮绿（更清晰）
+YELLOW='\033[33m'
+BLUE='\033[36m'
+RED='\033[31m'
+NC='\033[0m'        # 重置颜色
 
-# 1. 获取公网 IP
+# 1. 确保安装依赖
+if ! command -v qrencode &>/dev/null; then
+    apt-get update && apt-get install -y qrencode || yum install -y qrencode
+fi
+
+# 获取当前公网 IP
 IP=$(curl -sS4 --connect-timeout 3 --retry 1 ip.sb || curl -sS4 --connect-timeout 3 --retry 1 ifconfig.me || echo "127.0.0.1")
 
-# 2. 寻找 Xray 配置文件
+# 2. 定位配置文件
 XRAY_CONFIG=""
 PATHS=(
     "/usr/local/etc/xray/config.json"
@@ -32,13 +41,11 @@ if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; 
     SID=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.realitySettings.shortIds[0]' "$XRAY_CONFIG" 2>/dev/null)
     PRIV_KEY=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.realitySettings.privateKey' "$XRAY_CONFIG" 2>/dev/null)
 
-    # 尝试多种渠道获取/计算 PublicKey (公钥)
+    # 倒推/获取 PublicKey (公钥)
     PUBKEY=""
-    # 渠道 A: 从脚本日志/配置文件读取
     if [ -f "/usr/local/xray-script/config/script_config.json" ]; then
         PUBKEY=$(jq -r '.xray.public_key // .public_key' /usr/local/xray-script/config/script_config.json 2>/dev/null)
     fi
-    # 渠道 B: 从私钥调用 xray 工具实时倒推公钥
     if [ -z "$PUBKEY" ] || [ "$PUBKEY" = "null" ]; then
         if [ -n "$PRIV_KEY" ] && [ "$PRIV_KEY" != "null" ]; then
             if command -v xray &>/dev/null; then
@@ -49,7 +56,7 @@ if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; 
         fi
     fi
 
-    # 容错默认值
+    # 默认值容错
     [ -z "$SNI" ] || [ "$SNI" = "null" ] && SNI="www.leercapitulo.co"
     [ -z "$SID" ] || [ "$SID" = "null" ] && SID="8e86738553b1b65a"
     [ -z "$FLOW" ] || [ "$FLOW" = "null" ] && FLOW="xtls-rprx-vision"
@@ -60,8 +67,6 @@ if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; 
     SPX="%2F"
 
     if [ -n "$UUID" ] && [ "$UUID" != "null" ]; then
-        # 严格按照原版自带输出拼接参数链：
-        # type -> security -> sni -> pbk -> sid -> spx -> fp -> flow
         VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=${NET}&security=${SEC}&sni=${SNI}&pbk=${PUBKEY}&sid=${SID}&spx=${SPX}&fp=${FP}&flow=${FLOW}#🇺🇸"
 
         echo -e "------------------ 客户端配置(Vision) ------------------"
@@ -81,7 +86,8 @@ if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; 
         echo -e "ShortId          : ${SID}"
         echo -e "SpiderX          : /"
         echo -e "------------------ 分享链接 ------------------"
-        echo -e "${VLESS_LINK}"
+        # 绿色加粗输出链接，并在链接前后独立占行，保证终端三击或双击可以100%精准选中整行
+        echo -e "${GREEN}${VLESS_LINK}${NC}"
         echo -e "------------------ 二维码 ------------------"
         if command -v qrencode &>/dev/null; then
             qrencode -t ansiutf8 "${VLESS_LINK}"
@@ -99,9 +105,12 @@ if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; 
         echo -e "代理类型         : Socks5"
         echo -e "代理 IP          : ${IP}"
         echo -e "端口             : ${S5_PORT}"
-        echo -e "用户名           : ${S5_USER}"
-        echo -e "密码             : ${S5_PASS}"
+        echo -e "用户名           : ${GREEN}${S5_USER}${NC}"
+        echo -e "密码             : ${GREEN}${S5_PASS}${NC}"
         echo -e "------------------------------------------------------\n"
     fi
 
 fi
+EOF
+
+chmod +x /usr/local/bin/xray-info
