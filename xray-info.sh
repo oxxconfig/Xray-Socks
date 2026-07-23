@@ -1,7 +1,7 @@
 cat << 'EOF' > /usr/local/bin/xray-info
 #!/usr/bin/env bash
 # 定义颜色与样式
-GREEN='\033[1;32m'   # 加粗亮绿（更清晰）
+GREEN='\033[1;32m'   # 亮绿加粗
 YELLOW='\033[33m'
 BLUE='\033[36m'
 RED='\033[31m'
@@ -13,102 +13,95 @@ if ! command -v qrencode &>/dev/null; then
 fi
 
 # 获取当前公网 IP
-IP=$(curl -sS4 --connect-timeout 3 --retry 1 ip.sb || curl -sS4 --connect-timeout 3 --retry 1 ifconfig.me || echo "127.0.0.1")
+IP=$(curl -fsSL --connect-timeout 3 ipv4.icanhazip.com || curl -sS4 --connect-timeout 3 ip.sb || echo "127.0.0.1")
 
 # 2. 定位配置文件
-XRAY_CONFIG=""
-PATHS=(
-    "/usr/local/etc/xray/config.json"
-    "/usr/local/xray-script/config/xray/config.json"
-    "/etc/xray/config.json"
-    "$HOME/.xray-script/config.json"
-)
-for p in "${PATHS[@]}"; do [ -f "$p" ] && XRAY_CONFIG="$p" && break; done
+SCRIPT_CONFIG_PATH="${HOME}/.xray-script/config.json"
+XRAY_CONFIG_PATH="/usr/local/etc/xray/config.json"
 
-if [ -z "$XRAY_CONFIG" ]; then
-    XRAY_CONFIG=$(find /usr/local /etc /home -name "config.json" -path "*xray*" -type f 2>/dev/null | head -n 1)
-fi
+[ ! -f "$SCRIPT_CONFIG_PATH" ] && SCRIPT_CONFIG_PATH="/usr/local/xray-script/config/config.json"
+[ ! -f "$XRAY_CONFIG_PATH" ] && XRAY_CONFIG_PATH="/etc/xray/config.json"
 
-if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; then
+if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &>/dev/null; then
 
-    # 提取原版 VLESS-Vision-REALITY 参数
-    UUID=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .settings.clients[0].id' "$XRAY_CONFIG" 2>/dev/null)
-    PORT=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .port' "$XRAY_CONFIG" 2>/dev/null)
-    FLOW=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .settings.clients[0].flow' "$XRAY_CONFIG" 2>/dev/null)
-    NET=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.network' "$XRAY_CONFIG" 2>/dev/null)
-    SEC=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.security' "$XRAY_CONFIG" 2>/dev/null)
-    SNI=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.realitySettings.serverNames[0]' "$XRAY_CONFIG" 2>/dev/null)
-    SID=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.realitySettings.shortIds[0]' "$XRAY_CONFIG" 2>/dev/null)
-    PRIV_KEY=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.realitySettings.privateKey' "$XRAY_CONFIG" 2>/dev/null)
+    XRAY_CONFIG="$(jq '.' "${XRAY_CONFIG_PATH}")"
+    SCRIPT_CONFIG="$(jq '.' "${SCRIPT_CONFIG_PATH}")"
 
-    # 倒推/获取 PublicKey (公钥)
-    PUBKEY=""
-    if [ -f "/usr/local/xray-script/config/script_config.json" ]; then
-        PUBKEY=$(jq -r '.xray.public_key // .public_key' /usr/local/xray-script/config/script_config.json 2>/dev/null)
-    fi
-    if [ -z "$PUBKEY" ] || [ "$PUBKEY" = "null" ]; then
-        if [ -n "$PRIV_KEY" ] && [ "$PRIV_KEY" != "null" ]; then
-            if command -v xray &>/dev/null; then
-                PUBKEY=$(xray x25519 -i "$PRIV_KEY" 2>/dev/null | grep -i "Public key" | awk '{print $3}')
-            elif [ -f "/usr/local/bin/xray" ]; then
-                PUBKEY=$(/usr/local/bin/xray x25519 -i "$PRIV_KEY" 2>/dev/null | grep -i "Public key" | awk '{print $3}')
-            fi
-        fi
-    fi
-
-    # 默认值容错
-    [ -z "$SNI" ] || [ "$SNI" = "null" ] && SNI="www.leercapitulo.co"
-    [ -z "$SID" ] || [ "$SID" = "null" ] && SID="8e86738553b1b65a"
-    [ -z "$FLOW" ] || [ "$FLOW" = "null" ] && FLOW="xtls-rprx-vision"
-    [ -z "$NET" ] || [ "$NET" = "null" ] && NET="tcp"
-    [ -z "$SEC" ] || [ "$SEC" = "null" ] && SEC="reality"
-    [ -z "$PORT" ] || [ "$PORT" = "null" ] && PORT="443"
-    FP="chrome"
-    SPX="%2F"
-
-    if [ -n "$UUID" ] && [ "$UUID" != "null" ]; then
-        VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=${NET}&security=${SEC}&sni=${SNI}&pbk=${PUBKEY}&sid=${SID}&spx=${SPX}&fp=${FP}&flow=${FLOW}#🇺🇸"
-
-        echo -e "------------------ 客户端配置(Vision) ------------------"
-        echo -e "address          : ${IP}"
-        echo -e "port             : ${PORT}"
-        echo -e "protocol         : vless"
-        echo -e "uuid             : ${UUID}"
-        echo -e "password(trojan) :"
-        echo -e "seed(mKCP)       :"
-        echo -e "flow             : ${FLOW}"
-        echo -e "network          : ${NET}"
-        echo -e "security         : ${SEC}"
-        echo -e "ServerName       : ${SNI}"
-        echo -e "path             :"
-        echo -e "Fingerprint      : ${FP}"
-        echo -e "PublicKey        : ${PUBKEY}"
-        echo -e "ShortId          : ${SID}"
-        echo -e "SpiderX          : /"
-        echo -e "------------------ 分享链接 ------------------"
-        # 绿色加粗输出链接，并在链接前后独立占行，保证终端三击或双击可以100%精准选中整行
-        echo -e "${GREEN}${VLESS_LINK}${NC}"
-        echo -e "------------------ 二维码 ------------------"
-        if command -v qrencode &>/dev/null; then
-            qrencode -t ansiutf8 "${VLESS_LINK}"
-        fi
-        echo -e "------------------------------------------------------"
-    fi
-
-    # 追加 Socks5 明文账单
-    S5_PORT=$(jq -r '.inbounds[] | select(.tag=="SOCKS5-INBOUND") | .port' "$XRAY_CONFIG" 2>/dev/null)
-    S5_USER=$(jq -r '.inbounds[] | select(.tag=="SOCKS5-INBOUND") | .settings.accounts[0].user' "$XRAY_CONFIG" 2>/dev/null)
-    S5_PASS=$(jq -r '.inbounds[] | select(.tag=="SOCKS5-INBOUND") | .settings.accounts[0].pass' "$XRAY_CONFIG" 2>/dev/null)
+    # ------------------ 1. 顶部：Socks5 明文账单 ------------------
+    S5_PORT=$(echo "${XRAY_CONFIG}" | jq -r '.inbounds[] | select(.tag=="SOCKS5-INBOUND") | .port' 2>/dev/null)
+    S5_USER=$(echo "${XRAY_CONFIG}" | jq -r '.inbounds[] | select(.tag=="SOCKS5-INBOUND") | .settings.accounts[0].user' 2>/dev/null)
+    S5_PASS=$(echo "${XRAY_CONFIG}" | jq -r '.inbounds[] | select(.tag=="SOCKS5-INBOUND") | .settings.accounts[0].pass' 2>/dev/null)
 
     if [ -n "$S5_PORT" ] && [ "$S5_PORT" != "null" ]; then
-        echo -e "\n------------------ 浏览器专用 Socks5 ------------------"
+        echo -e "------------------ 浏览器专用 Socks5 ------------------"
         echo -e "代理类型         : Socks5"
         echo -e "代理 IP          : ${IP}"
         echo -e "端口             : ${S5_PORT}"
         echo -e "用户名           : ${GREEN}${S5_USER}${NC}"
         echo -e "密码             : ${GREEN}${S5_PASS}${NC}"
-        echo -e "------------------------------------------------------\n"
+        echo -e "------------------------------------------------------"
     fi
+
+    # ------------------ 2. 原版 get_common_config 精准提取 ------------------
+    # 查找 Vision 所在的 inbound 索引
+    inbound_index=$(echo "${XRAY_CONFIG}" | jq -r '([.inbounds[].tag] | index("VLESS-Vision-REALITY")) // 0')
+
+    PORT=$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.port // 443")
+    PUBKEY=$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.publicKey")
+    TAG=$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.tag // \"Vision\"")
+
+    PROTOCOL=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].protocol? // "vless"')
+    UUID=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].id? // empty')
+    PASSWORD=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].password? // empty')
+    SEED=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.kcpSettings.seed? // empty')
+    TYPE=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.network? // "tcp"')
+    FLOW=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].flow? // "xtls-rprx-vision"')
+    SECURITY=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.security? // "reality"')
+    PATH_VAL=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.xhttpSettings.path? // empty')
+
+    # 取第 0 个 serverName 和 shortId (原版是用 random 随机取，这里取第一个确定值)
+    SERVER_NAME=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.realitySettings.serverNames[0]? // "www.leercapitulo.co"')
+    SHORT_ID=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.realitySettings.shortIds[0]? // "8e86738553b1b65a"')
+
+    # 如果 SCRIPT_CONFIG 拿到的 publicKey 为空，尝试实时计算兜底
+    if [ -z "$PUBKEY" ] || [ "$PUBKEY" = "null" ]; then
+        PRIV_KEY=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.realitySettings.privateKey? // empty')
+        XRAY_BIN=$(which xray 2>/dev/null || find /usr -name "xray" -type f 2>/dev/null | head -n 1)
+        if [ -n "$PRIV_KEY" ] && [ -n "$XRAY_BIN" ]; then
+            PUBKEY=$("$XRAY_BIN" x25519 -i "$PRIV_KEY" 2>/dev/null | grep -i "Public key" | awk '{print $3}')
+        fi
+    fi
+
+    # ------------------ 3. 拼装原版标准的 VLESS 链接 ------------------
+    FP="chrome"
+    SPX="%2F"
+    VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=${TYPE}&security=${SECURITY}&sni=${SERVER_NAME}&pbk=${PUBKEY}&sid=${SHORT_ID}&spx=${SPX}&fp=${FP}&flow=${FLOW}#${TAG}"
+
+    echo -e "\n------------------ 客户端配置(${TAG}) ------------------"
+    echo -e "address          : ${IP}"
+    echo -e "port             : ${PORT}"
+    echo -e "protocol         : ${PROTOCOL}"
+    echo -e "uuid             : ${UUID}"
+    echo -e "password(trojan) : ${PASSWORD}"
+    echo -e "seed(mKCP)       : ${SEED}"
+    echo -e "flow             : ${FLOW}"
+    echo -e "network          : ${TYPE}"
+    echo -e "security         : ${SECURITY}"
+    echo -e "ServerName       : ${SERVER_NAME}"
+    echo -e "path             : ${PATH_VAL}"
+    echo -e "Fingerprint      : chrome"
+    echo -e "PublicKey        : ${PUBKEY}"
+    echo -e "ShortId          : ${SHORT_ID}"
+    echo -e "SpiderX          : /"
+
+    echo -e "------------------ 二维码 ------------------"
+    if command -v qrencode &>/dev/null; then
+        qrencode -t ansiutf8 "${VLESS_LINK}"
+    fi
+
+    echo -e "------------------ 分享链接 ------------------"
+    echo -e "${GREEN}${VLESS_LINK}${NC}"
+    echo -e "------------------------------------------------------\n"
 
 fi
 EOF
