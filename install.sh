@@ -250,7 +250,7 @@ function main() {
     json_lang=$(jq --arg language "zh" '.language = $language' "${SCRIPT_CONFIG_PATH}" 2>/dev/null)
     [[ -n "${json_lang}" ]] && echo "${json_lang}" >"${SCRIPT_CONFIG_PATH}"
 
-    # 配置全局 xray 快捷控制命令
+    # 配置全局 xray 快捷控制命令 (恢复指向管理脚本主菜单)
     if [ -f "${CORE_DIR}/main.sh" ]; then
         local target_rcs=("${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile")
         for rc in "${target_rcs[@]}"; do
@@ -260,7 +260,7 @@ function main() {
             fi
         done
         
-        # 写入全局 profile 防止登录后被二进制 xray 覆盖
+        # 写入全局 profile 确保所有新 SSH 登录自动继承，防止被二进制 xray 抢占
         echo "alias xray='bash ${CORE_DIR}/main.sh'" > /etc/profile.d/xray.sh
         chmod +x /etc/profile.d/xray.sh
     fi
@@ -274,12 +274,18 @@ function main() {
     # 2. 强制使用 systemd 平滑重启服务，脱离控制台阻塞
     systemctl restart xray &>/dev/null || systemctl restart xray-script &>/dev/null
 
-    # 3. 部署并挂载通用看板工具 xray-info
+    # 3. 部署并挂载通用看板工具 xray-info (单独的命令)
     echo -e "\n${GREEN}[看板配置]${NC} 正在挂载 Xray 全能信息看板工具..."
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-    # 4. 瞬间唤起看板，打印 Socks5 + VLESS + 二维码
+    # 4. 【核心修复】强行清理当前终端的命令缓存，并立即加载 alias 别名
+    # 这一步极其关键：它能让刚才安装完的真正的二进制 xray 失效，确保直接敲 xray 调出管理菜单
+    hash -r 2>/dev/null || true
+    shopt -s expand_aliases 2>/dev/null || true
+    alias xray="bash ${CORE_DIR}/main.sh" 2>/dev/null || true
+
+    # 5. 瞬间唤起看板，打印 Socks5 + VLESS + 二维码
     if [ -x "/usr/local/bin/xray-info" ]; then
         /usr/local/bin/xray-info
     fi
