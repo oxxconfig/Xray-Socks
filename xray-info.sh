@@ -62,7 +62,7 @@ if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; 
     if [ -n "$UUID" ] && [ "$UUID" != "null" ]; then
         # 严格按照原版自带输出拼接参数链：
         # type -> security -> sni -> pbk -> sid -> spx -> fp -> flow
-        VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=${NET}&security=${SEC}&sni=${SNI}&pbk=${PUBKEY}&sid=${SID}&spx=${SPX}&fp=${FP}&flow=${FLOW}#Vision"
+        VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=${NET}&security=${SEC}&sni=${SNI}&pbk=${PUBKEY}&sid=${SID}&spx=${SPX}&fp=${FP}&flow=${FLOW}#🇺🇸"
 
         echo -e "------------------ 客户端配置(Vision) ------------------"
         echo -e "address          : ${IP}"
