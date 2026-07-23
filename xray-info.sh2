@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Xray 节点信息提取 & 看板 (格式 100% 匹配原版 main.sh)
+# =============================================================================
+
+# 1. 获取公网 IP
+IP=$(curl -sS4 --connect-timeout 3 --retry 1 ip.sb || curl -sS4 --connect-timeout 3 --retry 1 ifconfig.me || echo "127.0.0.1")
+
+# 2. 寻找 Xray 配置文件
+XRAY_CONFIG=""
+PATHS=(
+    "/usr/local/etc/xray/config.json"
+    "/usr/local/xray-script/config/xray/config.json"
+    "/etc/xray/config.json"
+    "$HOME/.xray-script/config.json"
+)
+for p in "${PATHS[@]}"; do [ -f "$p" ] && XRAY_CONFIG="$p" && break; done
+
+if [ -z "$XRAY_CONFIG" ]; then
+    XRAY_CONFIG=$(find /usr/local /etc /home -name "config.json" -path "*xray*" -type f 2>/dev/null | head -n 1)
+fi
+
+if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ] && command -v jq &>/dev/null; then
+
+    # 提取原版 VLESS-Vision-REALITY 参数
+    UUID=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .settings.clients[0].id' "$XRAY_CONFIG" 2>/dev/null)
+    PORT=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .port' "$XRAY_CONFIG" 2>/dev/null)
+    FLOW=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .settings.clients[0].flow' "$XRAY_CONFIG" 2>/dev/null)
+    NET=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.network' "$XRAY_CONFIG" 2>/dev/null)
+    SEC=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.security' "$XRAY_CONFIG" 2>/dev/null)
+    SNI=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.realitySettings.serverNames[0]' "$XRAY_CONFIG" 2>/dev/null)
+    SID=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.realitySettings.shortIds[0]' "$XRAY_CONFIG" 2>/dev/null)
+    PRIV_KEY=$(jq -r '.inbounds[] | select(.tag=="VLESS-Vision-REALITY") | .streamSettings.realitySettings.privateKey' "$XRAY_CONFIG" 2>/dev/null)
+
+    # 尝试多种渠道获取/计算 PublicKey (公钥)
+    PUBKEY=""
+    # 渠道 A: 从脚本日志/配置文件读取
+    if [ -f "/usr/local/xray-script/config/script_config.json" ]; then
+        PUBKEY=$(jq -r '.xray.public_key // .public_key' /usr/local/xray-script/config/script_config.json 2>/dev/null)
+    fi
+    # 渠道 B: 从私钥调用 xray 工具实时倒推公钥
+    if [ -z "$PUBKEY" ] || [ "$PUBKEY" = "null" ]; then
+        if [ -n "$PRIV_KEY" ] && [ "$PRIV_KEY" != "null" ]; then
+            if command -v xray &>/dev/null; then
+                PUBKEY=$(xray x25519 -i "$PRIV_KEY" 2>/dev/null | grep -i "Public key" | awk '{print $3}')
+            elif [ -f "/usr/local/bin/xray" ]; then
+                PUBKEY=$(/usr/local/bin/xray x25519 -i "$PRIV_KEY" 2>/dev/null | grep -i "Public key" | awk '{print $3}')
+            fi
+        fi
+    fi
+
+    # 容错默认值
+    [ -z "$SNI" ] || [ "$SNI" = "null" ] && SNI="www.leercapitulo.co"
+    [ -z "$SID" ] || [ "$SID" = "null" ] && SID="8e86738553b1b65a"
+    [ -z "$FLOW" ] || [ "$FLOW" = "null" ] && FLOW="xtls-rprx-vision"
+    [ -z "$NET" ] || [ "$NET" = "null" ] && NET="tcp"
+    [ -z "$SEC" ] || [ "$SEC" = "null" ] && SEC="reality"
+    [ -z "$PORT" ] || [ "$PORT" = "null" ] && PORT="443"
+    FP="chrome"
+    SPX="%2F"
+
+    if [ -n "$UUID" ] && [ "$UUID" != "null" ]; then
+        # 严格按照原版自带输出拼接参数链：
+        # type -> security -> sni -> pbk -> sid -> spx -> fp -> flow
+        VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=${NET}&security=${SEC}&sni=${SNI}&pbk=${PUBKEY}&sid=${SID}&spx=${SPX}&fp=${FP}&flow=${FLOW}#Vision"
+
+        echo -e "------------------ 客户端配置(Vision) ------------------"
+        echo -e "address          : ${IP}"
+        echo -e "port             : ${PORT}"
+        echo -e "protocol         : vless"
+        echo -e "uuid             : ${UUID}"
+        echo -e "password(trojan) :"
+        echo -e "seed(mKCP)       :"
+        echo -e "flow             : ${FLOW}"
+        echo -e "network          : ${NET}"
+        echo -e "security         : ${SEC}"
+        echo -e "ServerName       : ${SNI}"
+        echo -e "path             :"
+        echo -e "Fingerprint      : ${FP}"
+        echo -e "PublicKey        : ${PUBKEY}"
+        echo -e "ShortId          : ${SID}"
+        echo -e "SpiderX          : /"
+        echo -e "------------------ 分享链接 ------------------"
+        echo -e "${VLESS_LINK}"
+        echo -e "------------------ 二维码 ------------------"
+        if command -v qrencode &>/dev/null; then
+            qrencode -t ansiutf8 "${VLESS_LINK}"
+        fi
+        echo -e "------------------------------------------------------"
+    fi
+
+    # 追加 Socks5 明文账单
+    S5_PORT=$(jq -r '.inbounds[] | select(.tag=="SOCKS5-INBOUND") | .port' "$XRAY_CONFIG" 2>/dev/null)
+    S5_USER=$(jq -r '.inbounds[] | select(.tag=="SOCKS5-INBOUND") | .settings.accounts[0].user' "$XRAY_CONFIG" 2>/dev/null)
+    S5_PASS=$(jq -r '.inbounds[] | select(.tag=="SOCKS5-INBOUND") | .settings.accounts[0].pass' "$XRAY_CONFIG" 2>/dev/null)
+
+    if [ -n "$S5_PORT" ] && [ "$S5_PORT" != "null" ]; then
+        echo -e "\n------------------ 浏览器专用 Socks5 ------------------"
+        echo -e "代理类型         : Socks5"
+        echo -e "代理 IP          : ${IP}"
+        echo -e "端口             : ${S5_PORT}"
+        echo -e "用户名           : ${S5_USER}"
+        echo -e "密码             : ${S5_PASS}"
+        echo -e "------------------------------------------------------\n"
+    fi
+
+fi
