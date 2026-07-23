@@ -59,7 +59,7 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
     SECURITY=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.security? // "reality"')
     PATH_VAL=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.xhttpSettings.path? // empty')
 
-    # 取第 0 个 serverName 和 shortId (原版是用 random 随机取，这里取第一个确定值)
+    # 取第 0 个 serverName 和 shortId
     SERVER_NAME=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.realitySettings.serverNames[0]? // "www.leercapitulo.co"')
     SHORT_ID=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.realitySettings.shortIds[0]? // "8e86738553b1b65a"')
 
@@ -72,10 +72,10 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
         fi
     fi
 
-    # ------------------ 3. 拼装原版标准的 VLESS 链接 ------------------
+    # ------------------ 3. 拼装标准的 VLESS 链接 (带美国国旗) ------------------
     FP="chrome"
     SPX="%2F"
-    VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=${TYPE}&security=${SECURITY}&sni=${SERVER_NAME}&pbk=${PUBKEY}&sid=${SHORT_ID}&spx=${SPX}&fp=${FP}&flow=${FLOW}#${TAG}"
+    VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=${TYPE}&security=${SECURITY}&sni=${SERVER_NAME}&pbk=${PUBKEY}&sid=${SHORT_ID}&spx=${SPX}&fp=${FP}&flow=${FLOW}#🇺🇸"
 
     echo -e "\n------------------ 客户端配置(${TAG}) ------------------"
     echo -e "address          : ${IP}"
