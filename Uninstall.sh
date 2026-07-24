@@ -23,4 +23,4 @@ rm -f /etc/profile.d/xray.sh
 # 5. 刷新命令缓存
 hash -r
 
-echo -e "\033[32m[提示] Xray 及管理脚本已彻底卸载清理完成！可以重新运行 install.sh 进行测试了。\033[0m"
+echo -e "\033[32m[提示] Xray 及管理脚本已彻底卸载清理完成！\033[0m"
