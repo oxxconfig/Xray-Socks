@@ -64,7 +64,7 @@ EOF
     if type iptables >/dev/null 2>&1; then
         if ! iptables -L INPUT -n 2>/dev/null | grep -q "dpt:443"; then
             iptables -I INPUT -p tcp --dport 443 -j ACCEPT
-            echo -e "${GREEN}[基础配置]${NC} 防火墙已放行 TCP 443 端口"
+            echo -e "${GREEN}[基础配置]${NC} 防火墙已放行 特定 端口"
             
             # 持久化规则保存
             if type iptables-save >/dev/null 2>&1; then
