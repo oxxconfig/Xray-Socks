@@ -161,7 +161,6 @@ function download_github_files() {
 }
 
 function download_xray_script_files() {
-    # 优先使用当前仓库名字 Xray-Socks
     download_github_files "$1" "https://github.com/oxxconfig/Xray-Socks/archive/refs/heads/main.tar.gz" || \
     download_github_files "$1" "https://github.com/oxxconfig/Xray/archive/refs/heads/main.tar.gz"
 }
@@ -253,16 +252,28 @@ function main() {
     # 1. 隔离标准输入唤起安装，防止卡在 STDIN 监听
     bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}" </dev/null
 
-    # 2. 强制使用 systemd 平滑重启服务，脱离控制台阻塞
-    systemctl restart xray &>/dev/null || systemctl restart xray-script &>/dev/null
-
-    # 3. 部署并挂载通用看板工具 xray-info
+    # 2. 部署并挂载通用看板工具 xray-info
     echo -e "\n${GREEN}[看板配置]${NC} 正在挂载 Xray 全能信息看板工具..."
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-    # 4. 【核心修复】：直接向 /usr/local/bin/xray 写入软路由脚本！
-    # 避开环境变量/别名(alias)在当前 SSH Session 不生效的问题，实现免重启立即生效！
+    # 3. 【解决 Text file busy 的核心逻辑】：
+    # 如果原来的二进制占着 /usr/local/bin/xray，我们用 mv -f 将其转移为 xray-bin，强行解除内核文件锁
+    if [ -f "/usr/local/bin/xray" ] && [ ! -L "/usr/local/bin/xray" ]; then
+        mv -f /usr/local/bin/xray /usr/local/bin/xray-bin 2>/dev/null || rm -f /usr/local/bin/xray 2>/dev/null
+    fi
+
+    # 4. 如果 systemd 服务文件指向的是 /usr/local/bin/xray，同步修正其指向真正的二进制文件 xray-bin
+    if [ -f "/etc/systemd/system/xray.service" ]; then
+        sed -i 's|/usr/local/bin/xray |/usr/local/bin/xray-bin |g' /etc/systemd/system/xray.service 2>/dev/null || true
+        sed -i 's|/usr/local/bin/xray -config|/usr/local/bin/xray-bin -config|g' /etc/systemd/system/xray.service 2>/dev/null || true
+        systemctl daemon-reload
+    fi
+
+    # 5. 重启后台服务，确保真正的二进制在后台以 xray-bin 正常运行
+    systemctl restart xray &>/dev/null || systemctl restart xray-script &>/dev/null
+
+    # 6. 生成可执行的软路由脚本，充当 xray 命令
     cat << 'EOF' > /usr/local/bin/xray
 #!/usr/bin/env bash
 if [ -f "/usr/local/xray-script/core/main.sh" ]; then
@@ -276,13 +287,14 @@ fi
 EOF
     chmod +x /usr/local/bin/xray
 
-    # 5. 清理历史 alias 污染，保证纯净
+    # 7. 清理历史 alias 污染，保证环境纯净
     for rc in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile" "/etc/profile.d/xray.sh"; do
         sed -i '/alias xray=/d' "$rc" 2>/dev/null || true
     done
     rm -f /etc/profile.d/xray.sh
+    hash -r 2>/dev/null || true
 
-    # 6. 【核心修复】：确保安装完成后，直接在控制台强行刷新一次看板输出
+    # 8. 打印看板
     if [ -x "/usr/local/bin/xray-info" ]; then
         echo ""
         /usr/local/bin/xray-info
