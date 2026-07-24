@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# =============================================================================
-# Xray 批量静默部署前置脚本 (集成 Socks5 + VLESS 自动化看板)
-# =============================================================================
 
 # 1. 严格权限断言 (彻底废除无意义的 sudo)
 if [ "$EUID" -ne 0 ]; then
@@ -64,7 +61,7 @@ EOF
     if type iptables >/dev/null 2>&1; then
         if ! iptables -L INPUT -n 2>/dev/null | grep -q "dpt:443"; then
             iptables -I INPUT -p tcp --dport 443 -j ACCEPT
-            echo -e "${GREEN}[基础配置]${NC} 防火墙已放行 特定 端口"
+            echo -e "${GREEN}[基础配置]${NC} 防火墙已放行 TCP 443 端口"
             
             # 持久化规则保存
             if type iptables-save >/dev/null 2>&1; then
@@ -250,21 +247,6 @@ function main() {
     json_lang=$(jq --arg language "zh" '.language = $language' "${SCRIPT_CONFIG_PATH}" 2>/dev/null)
     [[ -n "${json_lang}" ]] && echo "${json_lang}" >"${SCRIPT_CONFIG_PATH}"
 
-    # 配置全局 xray 快捷控制命令 (恢复指向管理脚本主菜单)
-    if [ -f "${CORE_DIR}/main.sh" ]; then
-        local target_rcs=("${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile")
-        for rc in "${target_rcs[@]}"; do
-            if [[ -f "${rc}" || "${rc}" == "${HOME}/.bashrc" ]]; then
-                sed -i '/alias xray=/d' "${rc}" 2>/dev/null || true
-                echo "alias xray='bash ${CORE_DIR}/main.sh'" >> "${rc}"
-            fi
-        done
-        
-        # 写入全局 profile 确保所有新 SSH 登录自动继承，防止被二进制 xray 抢占
-        echo "alias xray='bash ${CORE_DIR}/main.sh'" > /etc/profile.d/xray.sh
-        chmod +x /etc/profile.d/xray.sh
-    fi
-
     echo -e "${GREEN}[部署完成]${NC} 前置依赖与系统优化已就绪，正在唤起 Xray 主内核业务脚本..."
     echo "--------------------------------------------------------"
     
@@ -274,19 +256,35 @@ function main() {
     # 2. 强制使用 systemd 平滑重启服务，脱离控制台阻塞
     systemctl restart xray &>/dev/null || systemctl restart xray-script &>/dev/null
 
-    # 3. 部署并挂载通用看板工具 xray-info (单独的命令)
+    # 3. 部署并挂载通用看板工具 xray-info
     echo -e "\n${GREEN}[看板配置]${NC} 正在挂载 Xray 全能信息看板工具..."
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-    # 4. 【核心修复】强行清理当前终端的命令缓存，并立即加载 alias 别名
-    # 这一步极其关键：它能让刚才安装完的真正的二进制 xray 失效，确保直接敲 xray 调出管理菜单
-    hash -r 2>/dev/null || true
-    shopt -s expand_aliases 2>/dev/null || true
-    alias xray="bash ${CORE_DIR}/main.sh" 2>/dev/null || true
+    # 4. 【核心修复】：直接向 /usr/local/bin/xray 写入软路由脚本！
+    # 避开环境变量/别名(alias)在当前 SSH Session 不生效的问题，实现免重启立即生效！
+    cat << 'EOF' > /usr/local/bin/xray
+#!/usr/bin/env bash
+if [ -f "/usr/local/xray-script/core/main.sh" ]; then
+    exec bash /usr/local/xray-script/core/main.sh "$@"
+elif [ -f "/usr/local/bin/xray-bin" ]; then
+    exec /usr/local/bin/xray-bin "$@"
+else
+    echo "错误: 未找到 Xray 管理脚本！"
+    exit 1
+fi
+EOF
+    chmod +x /usr/local/bin/xray
 
-    # 5. 瞬间唤起看板，打印 Socks5 + VLESS + 二维码
+    # 5. 清理历史 alias 污染，保证纯净
+    for rc in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile" "/etc/profile.d/xray.sh"; do
+        sed -i '/alias xray=/d' "$rc" 2>/dev/null || true
+    done
+    rm -f /etc/profile.d/xray.sh
+
+    # 6. 【核心修复】：确保安装完成后，直接在控制台强行刷新一次看板输出
     if [ -x "/usr/local/bin/xray-info" ]; then
+        echo ""
         /usr/local/bin/xray-info
     fi
 }
