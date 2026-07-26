@@ -252,7 +252,7 @@ function main() {
     echo -e "${GREEN}[部署完成]${NC} 前置依赖与系统优化已就绪，正在唤起 Xray 主内核业务脚本..."
     echo "--------------------------------------------------------"
     
-    # 1. 隔离标准输入唤起安装，防止卡在 STDIN 监听
+# 1. 隔离标准输入唤起安装，防止卡在 STDIN 监听
     bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}" </dev/null
 
     # 2. 部署并挂载通用看板工具 xray-info
@@ -260,31 +260,36 @@ function main() {
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-    # 3. 强行解绑并删除已有二进制/快捷链接，解决 Text file busy 锁死问题
-    rm -f /usr/local/bin/xray 2>/dev/null
-
-    # 4. 写入全局软路由 Wrapper 脚本
-    cat << 'EOF' > /usr/local/bin/xray
+    # 3. 部署菜单包装脚本到 /usr/local/bin/xray-menu
+    cat << 'EOF' > /usr/local/bin/xray-menu
 #!/usr/bin/env bash
 if [ -f "/usr/local/xray-script/core/main.sh" ]; then
     exec bash /usr/local/xray-script/core/main.sh "$@"
-elif [ -f "/usr/local/bin/xray-bin" ]; then
-    exec /usr/local/bin/xray-bin "$@"
 else
     echo "错误: 未找到 Xray 管理脚本！"
     exit 1
 fi
 EOF
-    chmod +x /usr/local/bin/xray
+    chmod +x /usr/local/bin/xray-menu
 
-    # 5. 清理历史 alias 污染，保证环境纯净
+    # 4. 确保安装真实的 Xray 官方二进制内核到 /usr/local/bin/xray
+    if ! file /usr/local/bin/xray 2>/dev/null | grep -q "ELF 64-bit"; then
+        echo -e "${GREEN}[核心部署]${NC} 正在安装 Xray 官方二进制内核..."
+        bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh) install
+    fi
+
+    # 5. 设置终端快捷命令别名 (让用户在终端敲 xray 就能打开菜单，但不破坏 systemd 服务)
     for rc in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile" "/etc/profile.d/xray.sh"; do
         sed -i '/alias xray=/d' "$rc" 2>/dev/null || true
     done
-    rm -f /etc/profile.d/xray.sh
+    echo "alias xray='/usr/local/bin/xray-menu'" >> "${HOME}/.bashrc"
     hash -r 2>/dev/null || true
 
-    # 6. 自动唤醒并打印看板内容
+    # 6. 重载并拉起系统服务
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl restart xray 2>/dev/null || true
+
+    # 7. 自动唤醒并打印 VLESS + Socks5 看板内容
     if [ -x "/usr/local/bin/xray-info" ]; then
         echo ""
         /usr/local/bin/xray-info
