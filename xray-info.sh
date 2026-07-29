@@ -33,12 +33,12 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
     S5_PASS=$(echo "${XRAY_CONFIG}" | jq -r '.inbounds[] | select(.tag=="SOCKS5-INBOUND") | .settings.accounts[0].pass' 2>/dev/null)
 
     if [ -n "$S5_PORT" ] && [ "$S5_PORT" != "null" ]; then
-        echo -e "------------------ 浏览器专用 Socks5 ------------------"
-        echo -e "代理类型         : Socks5"
-        echo -e "代理 IP          : ${IP}"
-        echo -e "端口             : ${S5_PORT}"
-        echo -e "用户名           : ${GREEN}${S5_USER}${NC}"
-        echo -e "密码             : ${GREEN}${S5_PASS}${NC}"
+        echo -e "${YELLOW}[ 🌐 浏览器专用 Socks5 配置 ]${NC}"
+        echo -e " 🔹 代理类型 : Socks5"
+        echo -e " 🔹 代理 IP          : ${IP}"
+        echo -e " 🔹 端口             : ${S5_PORT}"
+        echo -e " 🔹 用户名           : ${GREEN}${S5_USER}${NC}"
+        echo -e " 🔹 密码             : ${GREEN}${S5_PASS}${NC}"
         echo -e "------------------------------------------------------"
     fi
 
@@ -94,12 +94,12 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
     echo -e "ShortId          : ${SHORT_ID}"
     echo -e "SpiderX          : /"
 
-    echo -e "------------------ 二维码 ------------------"
+    echo -e "${YELLOW}[ 📱 手机扫码专用二维码 ]${NC}"
     if command -v qrencode &>/dev/null; then
         qrencode -t ansiutf8 "${VLESS_LINK}"
     fi
 
-    echo -e "------------------ 分享链接 ------------------"
+    echo -e "${YELLOW}[ 🚀 核心 VLESS-REALITY 订阅链接 ]${NC}"
     echo -e "${GREEN}${VLESS_LINK}${NC}"
     echo -e "------------------------------------------------------\n"
 
