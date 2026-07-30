@@ -3,37 +3,34 @@
 # Fail2ban 静默一键部署脚本（禁止内核更新 / 无弹窗打扰）
 # =============================================================================
 
-# 1. 屏蔽所有 APT 交互弹窗与服务重启提示
+# 1. 设置非交互环境变量，防止再次弹出内核窗口
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
-# 2. 修复 /etc/hosts 解决主机名无法解析告警
-HOST_NAME=$(hostname)
-if [ -n "$HOST_NAME" ] && ! grep -q "$HOST_NAME" /etc/hosts; then
-    echo "127.0.0.1 $HOST_NAME" >> /etc/hosts
-fi
+# 2. 清理并修复被意外中断的 apt 任务
+dpkg --configure -a
+apt-get install -f -y
 
-# 3. 仅安装 Fail2ban 本体（不执行 apt-get upgrade，绝不触发内核升级）
-# -o 选项确保跳过配置文件询问与 needrestart 弹窗
+# 3. 重新静默安装 Fail2ban
 apt-get update -y
 apt-get install -y \
   -o Dpkg::Options::="--force-confdef" \
   -o Dpkg::Options::="--force-confold" \
   fail2ban
 
-# 4. 写入防爆破规则（10分钟内输错 3 次密码拉黑 24 小时）
+# 4. 写入防爆破规则
 cat << 'EOF' > /etc/fail2ban/jail.local
 [sshd]
 enabled = true
 port = ssh
 filter = sshd
-logpath = /var/log/auth.log
+backend = auto
 maxretry = 3
 findtime = 600
 bantime = 86400
 EOF
 
-# 5. 重载服务并设置开机自启
+# 5. 重启并激活服务
 systemctl daemon-reload
 systemctl restart fail2ban
 systemctl enable fail2ban
