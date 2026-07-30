@@ -72,7 +72,7 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
         fi
     fi
 
-    # ------------------ 3. 拼装标准的 VLESS 链接 (带美国国旗) ------------------
+    # ------------------ 3. 拼装标准的 VLESS 链接  ------------------
     FP="chrome"
     SPX="%2F"
     VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=${TYPE}&security=${SECURITY}&sni=${SERVER_NAME}&pbk=${PUBKEY}&sid=${SHORT_ID}&spx=${SPX}&fp=${FP}&flow=${FLOW}#🇺🇸"
