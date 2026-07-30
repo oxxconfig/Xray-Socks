@@ -260,31 +260,28 @@ function main() {
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-    # 3. 强行解绑并删除已有二进制/快捷链接，解决 Text file busy 锁死问题
-    rm -f /usr/local/bin/xray 2>/dev/null
-
-    # 4. 写入全局软路由 Wrapper 脚本
-    cat << 'EOF' > /usr/local/bin/xray
+# 3. 把菜单脚本独立写到 /usr/local/bin/xray-menu，绝对不破坏真正的二进制程序 /usr/local/bin/xray
+    cat << 'EOF' > /usr/local/bin/xray-menu
 #!/usr/bin/env bash
 if [ -f "/usr/local/xray-script/core/main.sh" ]; then
     exec bash /usr/local/xray-script/core/main.sh "$@"
-elif [ -f "/usr/local/bin/xray-bin" ]; then
-    exec /usr/local/bin/xray-bin "$@"
 else
     echo "错误: 未找到 Xray 管理脚本！"
     exit 1
 fi
 EOF
-    chmod +x /usr/local/bin/xray
+    chmod +x /usr/local/bin/xray-menu
 
-    # 5. 清理历史 alias 污染，保证环境纯净
-    for rc in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile" "/etc/profile.d/xray.sh"; do
-        sed -i '/alias xray=/d' "$rc" 2>/dev/null || true
+    # 4. 给当前终端添加 alias：敲 xray 自动打开交互菜单，同时让 systemd 继续使用真正的二进制文件
+    for rc in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile"; do
+        if [ -f "$rc" ]; then
+            sed -i '/alias xray=/d' "$rc" 2>/dev/null || true
+            echo "alias xray='/usr/local/bin/xray-menu'" >> "$rc"
+        fi
     done
-    rm -f /etc/profile.d/xray.sh
     hash -r 2>/dev/null || true
 
-    # 6. 自动唤醒并打印看板内容
+    # 5. 自动唤醒并打印看板内容
     if [ -x "/usr/local/bin/xray-info" ]; then
         echo ""
         /usr/local/bin/xray-info
