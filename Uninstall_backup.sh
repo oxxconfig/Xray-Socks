@@ -10,14 +10,16 @@ BACKUP_DIR="/tmp/xray_config_backup"
 rm -rf "${BACKUP_DIR}" && mkdir -p "${BACKUP_DIR}"
 
 # 备份核心配置文件
+HAS_BACKUP=0
 if [ -f "/usr/local/etc/xray/config.json" ]; then
     cp -f /usr/local/etc/xray/config.json "${BACKUP_DIR}/config.json"
+    HAS_BACKUP=1
     echo -e "\033[32m[✓]\033[0m 核心配置文件已安全备份至 ${BACKUP_DIR}/config.json"
 else
     echo -e "\033[31m[!]\033[0m 未找到原 config.json，将进行全新清理"
 fi
 
-# 备份脚本本身的记录数据（如有）
+# 备份脚本自身的记录数据
 if [ -d "${HOME}/.xray-script" ]; then
     cp -rf "${HOME}/.xray-script" "${BACKUP_DIR}/.xray-script"
 fi
@@ -32,7 +34,7 @@ systemctl disable xray xray-script 2>/dev/null
 rm -f /etc/systemd/system/xray.service /etc/systemd/system/xray-script.service
 systemctl daemon-reload
 
-# 3. 清理二进制文件、脚本目录及日志（保留备份）
+# 3. 清理二进制文件、脚本目录及日志
 rm -rf /usr/local/xray-script \
        /usr/local/bin/xray \
        /usr/local/bin/xray-bin \
@@ -42,11 +44,22 @@ rm -rf /usr/local/xray-script \
        /var/log/xray \
        ~/.xray-script
 
-# 4. 清理可能残留的快捷别名配置
+# 4. 清理快捷别名
 sed -i '/alias xray=/d' ~/.bashrc ~/.zshrc ~/.profile 2>/dev/null
 rm -f /etc/profile.d/xray.sh
-
-# 5. 刷新命令缓存
 hash -r 2>/dev/null || true
 
-echo -e "\033[32m[完成] Xray 环境已清理完毕！备份文件已保存在 /tmp/xray_config_backup/\033[0m"
+# =============================================================================
+# 关键修复点：预先还原配置文件目录，防止重装时生成新 ID
+# =============================================================================
+if [ ${HAS_BACKUP} -eq 1 ]; then
+    mkdir -p /usr/local/etc/xray
+    cp -f "${BACKUP_DIR}/config.json" /usr/local/etc/xray/config.json
+    
+    if [ -d "${BACKUP_DIR}/.xray-script" ]; then
+        cp -rf "${BACKUP_DIR}/.xray-script" "${HOME}/.xray-script"
+    fi
+    echo -e "\033[32m[✓]\033[0m 已将原 config.json 与 ID 配置提前归位！下一次运行 install.sh 将直接复用原节点信息。"
+fi
+
+echo -e "\033[32m[完成] Xray 环境已清理完毕！\033[0m"
