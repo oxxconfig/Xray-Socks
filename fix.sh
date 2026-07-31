@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 重装后节点激活与状态恢复脚本
+# Xray 重装后节点激活与状态恢复脚本 (全目录无损恢复版)
 # =============================================================================
 
 echo -e "\033[33m[*]\033[0m 正在检查配置文件归位状态..."
 
-# 1. 检查是否存在提前归位的配置文件
-if [ ! -f "/usr/local/etc/xray/config.json" ]; then
-    echo -e "\033[31m[错误] 未检测到 /usr/local/etc/xray/config.json！\033[0m"
-    if [ -f "/tmp/xray_config_backup/config.json" ]; then
-        echo -e "\033[33m[*]\033[0m 正在从临时隔离区强行拉取备份恢复..."
-        mkdir -p /usr/local/etc/xray
-        cp -pf /tmp/xray_config_backup/config.json /usr/local/etc/xray/config.json
+XRAY_DIR="/usr/local/etc/xray"
+BACKUP_DIR="/tmp/xray_config_backup"
+
+# 1. 如果当前配置目录为空或缺失，强制从备份目录无损拉取
+if [ ! -d "$XRAY_DIR" ] || [ -z "$(ls -A $XRAY_DIR 2>/dev/null)" ]; then
+    if [ -d "$BACKUP_DIR" ] && [ -n "$(ls -A $BACKUP_DIR 2>/dev/null)" ]; then
+        echo -e "\033[33m[*]\033[0m 正在从临时隔离区无损还原整个 Xray 配置目录..."
+        mkdir -p "$XRAY_DIR"
+        cp -a "$BACKUP_DIR"/. "$XRAY_DIR"/
     else
         echo -e "\033[31m[严重错误] 未找到任何配置备份，无法还原旧节点！\033[0m"
         exit 1
     fi
 fi
 
-# 2. 补齐交互菜单 alias，保证终端敲 xray 能顺利进入菜单
+# 2. 补齐交互菜单 alias
 for rc in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile"; do
     if [ -f "$rc" ]; then
         sed -i '/alias xray=/d' "$rc" 2>/dev/null || true
@@ -40,9 +42,9 @@ if systemctl is-active --quiet xray; then
     
     # 打印当前监听端口
     echo -e "\033[33m[*]\033[0m 当前端口监听状态："
-    ss -tulnp | grep xray || echo -e "\033[31m[警告] 未检测到 xray 监听端口，请检查 config.json 格式是否正确\033[0m"
+    ss -tulnp | grep xray || echo -e "\033[31m[警告] 未检测到 xray 监听端口\033[0m"
     
-    echo -e "\n\033[32m[恢复成功] 节点信息已成功无缝复原，客户端无需任何修改直接可用！\033[0m"
+    echo -e "\n\033[32m[恢复成功] 双协议节点信息已成功无缝复原！\033[0m"
     echo -e "------------------------------------------------------"
     
     # 5. 自动唤醒打印节点看板
@@ -50,5 +52,5 @@ if systemctl is-active --quiet xray; then
         /usr/local/bin/xray-info
     fi
 else
-    echo -e "\033[31m[错误] Xray 服务启动失败，请运行 systemctl status xray 查看详细日志！\033[0m"
+    echo -e "\033[31m[错误] Xray 服务启动失败，请运行 systemctl status xray 查看日志！\033[0m"
 fi
