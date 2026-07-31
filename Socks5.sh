@@ -30,20 +30,46 @@ if [ -z "$XRAY_CONFIG" ]; then
 fi
 
 # 4. 执行注入逻辑
-if [ -n "$XRAY_CONFIG" ] && [ -f "$XRAY_CONFIG" ]; then
-    echo -e "\033[32m[找到配置] 正在对目标文件注入 Socks5: $XRAY_CONFIG\033[0m"
-    
-    # 备份原配置
-    cp "$XRAY_CONFIG" "${XRAY_CONFIG}.bak"
-    
-    # 构造并精准追加 Socks5 节点到 inbounds
-    NEW_INBOUND=$(jq -n \
-      --arg port "$S5_PORT" \
-      --arg user "$S5_USER" \
-      --arg pass "$S5_PASS" \
-      '{tag: "SOCKS5-INBOUND", listen: "0.0.0.0", port: ($port|tonumber), protocol: "socks", settings: {auth: "password", accounts: [{user: $user, pass: $pass}], udp: true}, sniffing: {enabled: true, destOverride: ["http", "tls"]}}')
-    
-    jq --argjson new "$NEW_INBOUND" '.inbounds += [$new]' "$XRAY_CONFIG" > "${XRAY_CONFIG}.tmp" && mv "${XRAY_CONFIG}.tmp" "$XRAY_CONFIG"
+NEW_INBOUND=$(jq -n \
+--arg port "$S5_PORT" \
+--arg user "$S5_USER" \
+--arg pass "$S5_PASS" \
+'
+{
+tag:"SOCKS5-INBOUND",
+listen:"0.0.0.0",
+port:($port|tonumber),
+protocol:"socks",
+settings:{
+ auth:"password",
+ accounts:[
+  {
+   user:$user,
+   pass:$pass
+  }
+ ],
+ udp:true
+},
+sniffing:{
+ enabled:true,
+ destOverride:["http","tls","quic"]
+}
+}
+')
+
+
+jq \
+--argjson new "$NEW_INBOUND" \
+'
+.inbounds =
+(
+(.inbounds // [])
+| map(select(.tag!="SOCKS5-INBOUND"))
+)
++ [$new]
+' \
+"$XRAY_CONFIG" > "${XRAY_CONFIG}.tmp" \
+&& mv "${XRAY_CONFIG}.tmp" "$XRAY_CONFIG"
     
     # 5. 重启服务
     systemctl restart xray && echo -e "\033[32m[成功] Xray 服务已成功重启！\033[0m" || xray restart
