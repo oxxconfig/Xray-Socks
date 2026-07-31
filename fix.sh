@@ -1,59 +1,44 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 重装后节点激活与状态恢复脚本 (全目录无损恢复版)
+# Xray 无损全自动重装脚本（强行还原旧 PBK/UUID/Socks5）
 # =============================================================================
 
-echo -e "\033[33m[*]\033[0m 正在检查配置文件归位状态..."
-
-XRAY_DIR="/usr/local/etc/xray"
 BACKUP_DIR="/tmp/xray_config_backup"
+rm -rf "${BACKUP_DIR}" && mkdir -p "${BACKUP_DIR}"
 
-# 1. 如果当前配置目录为空或缺失，强制从备份目录无损拉取
-if [ ! -d "$XRAY_DIR" ] || [ -z "$(ls -A $XRAY_DIR 2>/dev/null)" ]; then
-    if [ -d "$BACKUP_DIR" ] && [ -n "$(ls -A $BACKUP_DIR 2>/dev/null)" ]; then
-        echo -e "\033[33m[*]\033[0m 正在从临时隔离区无损还原整个 Xray 配置目录..."
-        mkdir -p "$XRAY_DIR"
-        # 使用 -aT 参数更安全地将备份目录下的所有文件（含隐藏文件）无损覆盖还原
-        cp -aT "$BACKUP_DIR" "$XRAY_DIR"
-    else
-        echo -e "\033[31m[严重错误] 未找到任何配置备份，无法还原旧节点！\033[0m"
-        exit 1
-    fi
+echo -e "\033[33m[*]\033[0m 步骤 1/4: 锁定现有节点配置..."
+HAS_BACKUP=0
+if [ -d "/usr/local/etc/xray" ] && [ -n "$(ls -A /usr/local/etc/xray 2>/dev/null)" ]; then
+    cp -aT /usr/local/etc/xray "${BACKUP_DIR}/xray"
+    HAS_BACKUP=1
+    echo -e "\033[32m[✓]\033[0m 旧节点配置已安全锁定在内存/临时区！"
+else
+    echo -e "\033[31m[!]\033[0m 未找到旧配置，本次将进行全新的安装。"
 fi
 
-# 2. 补齐交互菜单 alias，保证终端敲 xray 能顺利进入菜单
-for rc in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile"; do
-    if [ -f "$rc" ]; then
-        sed -i '/alias xray=/d' "$rc" 2>/dev/null || true
-        echo "alias xray='/usr/local/bin/xray-menu'" >> "$rc"
-    fi
-done
-hash -r 2>/dev/null || true
+echo -e "\n\033[33m[*]\033[0m 步骤 2/4: 清理旧版本程序..."
+systemctl stop xray 2>/dev/null
+systemctl disable xray 2>/dev/null
+rm -rf /usr/local/bin/xray /usr/local/share/xray /usr/local/etc/xray
 
-# 3. 重载 systemd 并强行重启 Xray 服务
-echo -e "\033[33m[*]\033[0m 正在刷新服务并唤醒内核程序..."
-systemctl daemon-reload
-systemctl enable xray >/dev/null 2>&1
-systemctl restart xray
+echo -e "\n\033[33m[*]\033[0m 步骤 3/4: 触发一键安装脚本..."
+rm -f install.sh
+curl --connect-timeout 10 --retry 3 -sSO https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/install.sh
+sed -i 's/\r$//' install.sh
+bash install.sh --vision
 
-# 4. 校验服务与端口状态
-sleep 1.5
-if systemctl is-active --quiet xray; then
-    echo -e "\033[32m[✓] Xray 后台核心服务运行正常 (Active)！\033[0m"
+# =============================================================================
+# 关键救场动作：在 install.sh 跑完并生成新配置后，强行把旧配置覆写回去！
+# =============================================================================
+if [ ${HAS_BACKUP} -eq 1 ]; then
+    echo -e "\n\033[33m[*]\033[0m 步骤 4/4: 检测到旧配置，正在强制覆写还原节点..."
+    systemctl stop xray 2>/dev/null
     
-    # 打印当前监听端口
-    echo -e "\033[33m[*]\033[0m 当前端口监听状态："
-    ss -tulnp | grep xray || echo -e "\033[31m[警告] 未检测到 xray 监听端口\033[0m"
+    # 强制将备份的配置文件还原回 Xray 目录
+    cp -aT "${BACKUP_DIR}/xray" /usr/local/etc/xray
     
-    echo -e "\n\033[32m[恢复成功] 节点信息已成功无缝复原！\033[0m"
-    echo -e "------------------------------------------------------"
-    
-    # 5. 自动唤醒打印节点看板
-    if [ -x "/usr/local/bin/xray-info" ]; then
-        /usr/local/bin/xray-info
-    fi
-else
-    echo -e "\033[31m[错误] Xray 服务启动失败！最新日志如下：\033[0m"
-    journalctl -u xray --no-pager -n 15
-    exit 1
+    # 重启 Xray 加载旧配置
+    systemctl restart xray
+    echo -e "\033[32m[完美成功]\033[0m 已成功抹掉 install.sh 生成的新密钥，旧节点（UUID/PBK/Socks5）已完全复原！"
+    echo -e "\033[36m👉 客户端无需做任何更改，直接连接即可！\033[0m"
 fi
