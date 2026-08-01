@@ -178,7 +178,7 @@ function check_xray_script_version() {
     if [[ "${local_version}" != "${remote_version}" && "${remote_version}" != "0.0.0" ]]; then
         echo -e "${GREEN}[更新提示]${NC} 检测到新版本，自动同步中..."
         
-        # 将临时下载目录放到 /tmp 避开与 SCRIPT_CONFIG_DIR 的路径嵌套冲突
+        # 1. 独立临时目录下载，防止路径嵌套
         local temp_dir="/tmp/xray-script-temp-update"
         rm -rf "${temp_dir}" && mkdir -p "${temp_dir}"
         download_xray_script_files "${temp_dir}"
@@ -186,7 +186,13 @@ function check_xray_script_version() {
         cp -rf "${temp_dir}"/* "${PROJECT_ROOT}/"
         rm -rf "${temp_dir}"
         
-        sed -i "s|${local_version}|${remote_version}|" "${SCRIPT_CONFIG_PATH}" 2>/dev/null
+        # 2. 核心修复：用 jq 精准写入版本号，彻底解决 sed 替换失败导致的死循环
+        local json_payload
+        json_payload=$(jq --arg ver "${remote_version}" '.version = $ver' "${SCRIPT_CONFIG_PATH}" 2>/dev/null)
+        if [[ -n "${json_payload}" ]]; then
+            echo "${json_payload}" > "${SCRIPT_CONFIG_PATH}"
+        fi
+
         echo -e "${GREEN}[更新提示]${NC} 更新完成，正在恢复参数重新载入..."
         
         exec bash "${CUR_DIR}/${CUR_FILE}" "${ORIGINAL_ARGS[@]}"
