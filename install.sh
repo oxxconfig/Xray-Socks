@@ -177,22 +177,34 @@ function check_xray_script_version() {
 
     if [[ "${local_version}" != "${remote_version}" && "${remote_version}" != "0.0.0" ]]; then
         echo -e "${GREEN}[更新提示]${NC} 检测到新版本，自动同步中..."
+        cd "${HOME}" || exit 1
         
-        # 1. 独立临时目录下载，防止路径嵌套
-        local temp_dir="/tmp/xray-script-temp-update"
-        rm -rf "${temp_dir}" && mkdir -p "${temp_dir}"
+        # 使用 /tmp 临时目录，防止路径嵌套 mv 报错
+        local temp_dir="/tmp/xray-script-temp"
+        mkdir -p "${temp_dir}"
         download_xray_script_files "${temp_dir}"
         
+        if [[ -n "${PROJECT_ROOT}" && "${PROJECT_ROOT}" != "/" && "${PROJECT_ROOT}" != "/root" ]]; then
+            rm -rf "${PROJECT_ROOT}"
+        fi
+        
+        mkdir -p "${PROJECT_ROOT}"
         cp -rf "${temp_dir}"/* "${PROJECT_ROOT}/"
         rm -rf "${temp_dir}"
-        
-        # 2. 核心修复：用 jq 精准写入版本号，彻底解决 sed 替换失败导致的死循环
-        local json_payload
-        json_payload=$(jq --arg ver "${remote_version}" '.version = $ver' "${SCRIPT_CONFIG_PATH}" 2>/dev/null)
-        if [[ -n "${json_payload}" ]]; then
-            echo "${json_payload}" > "${SCRIPT_CONFIG_PATH}"
-        fi
 
+        # ---------------------------------------------------------------------
+        # 【关键修复】：必须把解压出来的最新 config.json 同步到配置文件路径！
+        # 否则 SCRIPT_CONFIG_PATH 里永远是旧版本，导致 exec bash 永远死循环！
+        # ---------------------------------------------------------------------
+        if [[ -f "${PROJECT_ROOT}/config.json" ]]; then
+            cp -f "${PROJECT_ROOT}/config.json" "${SCRIPT_CONFIG_PATH}"
+        else
+            sed -i "s|${local_version}|${remote_version}|" "${SCRIPT_CONFIG_PATH}" 2>/dev/null
+        fi
+        
+        rm -f "${CUR_DIR}/${CUR_FILE}"
+        cp -f "${PROJECT_ROOT}/install.sh" "${CUR_DIR}/${CUR_FILE}"
+        
         echo -e "${GREEN}[更新提示]${NC} 更新完成，正在恢复参数重新载入..."
         
         exec bash "${CUR_DIR}/${CUR_FILE}" "${ORIGINAL_ARGS[@]}"
