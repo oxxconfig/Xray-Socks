@@ -102,13 +102,12 @@ if [ "${HAS_BACKUP}" -eq 1 ]; then
         fi
     fi
 fi
-
 # =============================================================================
 # 5. 检查并启动
 # =============================================================================
 echo -e "\n${YELLOW}[*] 步骤 5/5: 检查配置合法性并启动服务...${RESET}"
 
-xray run -test -config "${XRAY_DIR}/config.json" || {
+/usr/local/bin/xray run -test -config "${XRAY_DIR}/config.json" || {
     echo -e "${RED}[!] Xray 配置文件语法错误！${RESET}"
     exit 1
 }
@@ -120,10 +119,17 @@ sleep 2
 if systemctl is-active --quiet xray; then
     echo
     echo -e "${GREEN}=================================${RESET}"
-    echo -e "${GREEN}   完美成功：节点无损恢复完成   ${RESET}"
+    echo -e "${GREEN}    完美成功：节点无损恢复完成   ${RESET}"
     echo -e "${GREEN}=================================${RESET}"
     echo -e "${BLUE}UUID / Reality / Socks5 均保持原样${RESET}"
-    echo -e "${BLUE}客户端无需修改，xray-info 显示已同步！${RESET}"
+    
+    # ---------------------------------------------------------------------
+    # 【关键修正】：恢复配置并写入公钥后，必须重新唤起看板输出最新正确链接！
+    # ---------------------------------------------------------------------
+    if [ -x "/usr/local/bin/xray-info" ]; then
+        echo -e "\n${GREEN}[看板同步] 正在读取恢复后的配置生成最新节点链接：${RESET}"
+        /usr/local/bin/xray-info
+    fi
 else
     echo -e "${RED}[!] Xray 启动失败，请检查日志：${RESET}"
     journalctl -u xray -n 30 --no-pager
