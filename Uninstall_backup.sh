@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 节点无损全自动重装脚本（环境变量防死锁终极版）
+# Xray 节点无损全自动重装脚本（公钥推算修复与面板同步终极版）
 # =============================================================================
 
 set -e
 
-# 1. 强制初始化系统语言环境变量，防止 install.sh 报 null/core/main.sh 错误
+# 1. 强制初始化系统语言环境变量
 export SYS_LANG="zh_CN"
 export LANG="zh_CN.UTF-8"
 
@@ -88,20 +88,29 @@ if [ "${HAS_BACKUP}" -eq 1 ]; then
         cp -a "${BACKUP_DIR}/ssl"/* /etc/ssl/ 2>/dev/null || true
     fi
 
-    # 3. 修复面板：锁定语言并同步重新计算的 PublicKey
+    # 3. 修复面板：锁定语言与配置文件同步
     mkdir -p "${SCRIPT_DIR}"
     echo "zh_CN" > "${SCRIPT_DIR}/lang" 2>/dev/null || true
     cp -f "${XRAY_DIR}/config.json" "${SCRIPT_DIR}/config.json" 2>/dev/null || true
 
+    # 4. 提取私钥并精密推算公钥（去除 ANSI 颜色字符干扰）
     PRIV_KEY=$(grep -oP '"privateKey":\s*"\K[^"]+' "${XRAY_DIR}/config.json" 2>/dev/null || true)
     if [ -n "${PRIV_KEY}" ] && [ -x "/usr/local/bin/xray" ]; then
-        PUB_KEY=$(/usr/local/bin/xray x25519 -i "${PRIV_KEY}" 2>/dev/null | grep -i "Public key" | awk '{print $3}' || true)
+        PUB_KEY=$(/usr/local/bin/xray x25519 -i "${PRIV_KEY}" 2>/dev/null | grep -oP 'Public key:\s*\K[A-Za-z0-9_-]{43}')
+        
         if [ -n "${PUB_KEY}" ]; then
+            # 写入所有可能的面板记录目录，防止遗漏
             echo "${PUB_KEY}" > "${SCRIPT_DIR}/public_key" 2>/dev/null || true
+            if [ -d "/etc/xray-script" ]; then
+                echo "${PUB_KEY}" > "/etc/xray-script/public_key" 2>/dev/null || true
+            fi
             echo -e "${GREEN}[✓] 自动推算并更新恢复 PublicKey: ${PUB_KEY}${RESET}"
+        else
+            echo -e "${RED}[!] 公钥推算失败，请检查私钥格式是否正确！${RESET}"
         fi
     fi
 fi
+
 # =============================================================================
 # 5. 检查并启动
 # =============================================================================
@@ -123,9 +132,7 @@ if systemctl is-active --quiet xray; then
     echo -e "${GREEN}=================================${RESET}"
     echo -e "${BLUE}UUID / Reality / Socks5 均保持原样${RESET}"
     
-    # ---------------------------------------------------------------------
-    # 【关键修正】：恢复配置并写入公钥后，必须重新唤起看板输出最新正确链接！
-    # ---------------------------------------------------------------------
+    # 唤起看板展示最终正确节点链接
     if [ -x "/usr/local/bin/xray-info" ]; then
         echo -e "\n${GREEN}[看板同步] 正在读取恢复后的配置生成最新节点链接：${RESET}"
         /usr/local/bin/xray-info
