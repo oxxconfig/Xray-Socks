@@ -1,25 +1,69 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 节点无损全自动重装脚本
-# 修复版：解决 xray-script-temp / null 自更新死锁问题
+# Xray-Socks 无损自动重装恢复脚本
+# Ubuntu 22.04 优化版
+#
+# 保留:
+#   UUID
+#   Reality PrivateKey
+#   Reality ShortID
+#   Socks5 用户
+#   TLS证书
+#   面板数据
+#
+# 修复:
+#   xray-script-temp -> null
+#   locale错误
+#   半安装状态
 # =============================================================================
 
 
 set -e
 
 
-# ===============================
+# =============================================================================
 # 环境初始化
-# ===============================
+# =============================================================================
 
 export HOME=/root
 export SYS_LANG="zh_CN"
+
+
+# 自动生成中文locale
+
+if ! locale -a 2>/dev/null | grep -qi "zh_CN.utf8"; then
+
+    echo "[*] 正在生成中文系统环境..."
+
+    apt-get update -qq
+
+    apt-get install -y locales >/dev/null 2>&1 || true
+
+
+    sed -i \
+    's/^# *zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' \
+    /etc/locale.gen 2>/dev/null || true
+
+
+    locale-gen zh_CN.UTF-8 >/dev/null 2>&1 || true
+
+fi
+
+
 export LANG="zh_CN.UTF-8"
 export LC_ALL="zh_CN.UTF-8"
 
 
+
+# =============================================================================
+# 参数
+# =============================================================================
+
+
 BACKUP_DIR="/root/xray_config_backup"
+
 XRAY_DIR="/usr/local/etc/xray"
+
 SCRIPT_DIR="/root/.xray-script"
 
 
@@ -31,10 +75,22 @@ RESET="\033[0m"
 
 
 
-echo -e "${YELLOW}[*] 初始化备份环境...${RESET}"
+echo -e "${YELLOW}[*] 初始化环境...${RESET}"
 
 
-# 保留旧备份
+
+# =============================================================================
+# 创建备份
+# =============================================================================
+
+
+echo
+
+echo -e "${YELLOW}[*] 步骤 1/6: 备份节点数据...${RESET}"
+
+
+
+# 防止覆盖旧备份
 
 if [ -d "${BACKUP_DIR}" ]; then
 
@@ -44,17 +100,9 @@ if [ -d "${BACKUP_DIR}" ]; then
 fi
 
 
+
 mkdir -p "${BACKUP_DIR}"
 
-
-
-# ===============================
-# 1. 备份
-# ===============================
-
-
-echo
-echo -e "${YELLOW}[*] 步骤 1/5: 备份节点数据...${RESET}"
 
 
 HAS_BACKUP=0
@@ -66,31 +114,37 @@ HAS_BACKUP=0
 if [ -f "${XRAY_DIR}/config.json" ]; then
 
 
-mkdir -p "${BACKUP_DIR}/xray"
+    mkdir -p "${BACKUP_DIR}/xray"
 
 
-cp -a "${XRAY_DIR}"/*.json \
-"${BACKUP_DIR}/xray/" \
-2>/dev/null || true
+    cp -a \
+    "${XRAY_DIR}"/*.json \
+    "${BACKUP_DIR}/xray/" \
+    2>/dev/null || true
 
 
-HAS_BACKUP=1
+    HAS_BACKUP=1
 
 
-echo -e "${GREEN}[✓] Xray配置已备份${RESET}"
+    echo -e "${GREEN}[✓] Xray配置备份完成${RESET}"
 
+else
+
+    echo -e "${RED}[!] 未发现config.json${RESET}"
 
 fi
 
 
 
-# SSL
 
-if [ -d /etc/ssl ]; then
+# TLS
 
-cp -a /etc/ssl \
-"${BACKUP_DIR}/ssl" \
-2>/dev/null || true
+if [ -d "/etc/ssl" ]; then
+
+    cp -a \
+    /etc/ssl \
+    "${BACKUP_DIR}/ssl" \
+    2>/dev/null || true
 
 fi
 
@@ -101,21 +155,24 @@ fi
 if [ -d "${SCRIPT_DIR}" ]; then
 
 
-cp -a "${SCRIPT_DIR}" \
-"${BACKUP_DIR}/xray-script"
+    cp -a \
+    "${SCRIPT_DIR}" \
+    "${BACKUP_DIR}/xray-script"
 
 
 fi
 
 
 
-# ===============================
-# 2. 清理
-# ===============================
+
+# =============================================================================
+# 清理旧环境
+# =============================================================================
 
 
 echo
-echo -e "${YELLOW}[*] 步骤 2/5: 清理旧环境...${RESET}"
+
+echo -e "${YELLOW}[*] 步骤 2/6: 清理旧Xray环境...${RESET}"
 
 
 
@@ -134,34 +191,37 @@ rm -rf \
 
 
 
+
 # ★关键修复
-# 删除损坏更新缓存
+# 清除导致null错误的缓存
+
 
 if [ -d "${SCRIPT_DIR}" ]; then
 
 
-rm -rf \
-"${SCRIPT_DIR}/xray-script-temp" \
-"${SCRIPT_DIR}/null"
+    rm -rf \
+    "${SCRIPT_DIR}/xray-script-temp" \
+    "${SCRIPT_DIR}/null"
 
 
 fi
 
 
 
-# 清除旧安装文件
-
 rm -f /root/install.sh
 
 
 
-# ===============================
-# 3.重新安装
-# ===============================
+
+
+# =============================================================================
+# 下载安装
+# =============================================================================
 
 
 echo
-echo -e "${YELLOW}[*] 步骤 3/5: 重新安装 Xray...${RESET}"
+
+echo -e "${YELLOW}[*] 步骤 3/6: 下载最新安装脚本...${RESET}"
 
 
 
@@ -177,31 +237,39 @@ sed -i 's/\r$//' install.sh
 
 
 
+
+echo
+
+echo -e "${YELLOW}[*] 开始重新安装Xray...${RESET}"
+
+
+
 SYS_LANG="zh_CN" \
 LANG="zh_CN.UTF-8" \
 LC_ALL="zh_CN.UTF-8" \
+timeout 300 \
 bash install.sh --vision
 
 
 
-# 检查
 
-if [ ! -x /usr/local/bin/xray ]; then
+# 检查核心
 
-
-echo -e "${RED}[错误] Xray安装失败${RESET}"
+if [ ! -x "/usr/local/bin/xray" ]; then
 
 
-exit 1
+    echo -e "${RED}[错误] Xray核心安装失败${RESET}"
 
+    exit 1
 
 fi
 
 
 
-# ===============================
-# 4.恢复
-# ===============================
+
+# =============================================================================
+# 恢复配置
+# =============================================================================
 
 
 if [ "${HAS_BACKUP}" = "1" ]; then
@@ -209,7 +277,8 @@ if [ "${HAS_BACKUP}" = "1" ]; then
 
 
 echo
-echo -e "${YELLOW}[*] 步骤 4/5: 恢复节点数据...${RESET}"
+
+echo -e "${YELLOW}[*] 步骤 4/6: 恢复节点配置...${RESET}"
 
 
 
@@ -221,7 +290,7 @@ mkdir -p "${XRAY_DIR}"
 
 
 
-# 恢复配置
+# 恢复JSON
 
 cp -a \
 "${BACKUP_DIR}/xray/"*.json \
@@ -230,16 +299,20 @@ cp -a \
 
 
 
+
 # 恢复SSL
 
 if [ -d "${BACKUP_DIR}/ssl" ]; then
+
 
 cp -a \
 "${BACKUP_DIR}/ssl/"* \
 /etc/ssl/ \
 2>/dev/null || true
 
+
 fi
+
 
 
 
@@ -260,8 +333,8 @@ fi
 
 
 
-# 修复权限
 
+# 权限修复
 
 chown -R root:root "${XRAY_DIR}"
 
@@ -277,19 +350,32 @@ fi
 
 
 
-# ===============================
-# 5.检查启动
-# ===============================
+# =============================================================================
+# 配置检测
+# =============================================================================
 
 
 echo
-echo -e "${YELLOW}[*] 步骤 5/5: 检查并启动...${RESET}"
+
+echo -e "${YELLOW}[*] 步骤 5/6: 检查Xray配置...${RESET}"
 
 
 
 xray run \
 -test \
 -config "${XRAY_DIR}/config.json"
+
+
+
+
+# =============================================================================
+# 启动
+# =============================================================================
+
+
+echo
+
+echo -e "${YELLOW}[*] 步骤 6/6: 启动服务...${RESET}"
 
 
 
@@ -304,31 +390,40 @@ sleep 3
 
 
 
+
 if systemctl is-active --quiet xray; then
 
 
 echo
+
 echo -e "${GREEN}"
-echo "================================="
+echo "======================================"
 echo " Xray 无损重装恢复成功 "
-echo "================================="
+echo "======================================"
 echo -e "${RESET}"
 
 
-echo -e "${BLUE}UUID 保留${RESET}"
-echo -e "${BLUE}Reality 私钥保留${RESET}"
-echo -e "${BLUE}Socks5 用户保留${RESET}"
-echo -e "${BLUE}客户端无需修改${RESET}"
+echo -e "${BLUE}✓ UUID 保留${RESET}"
+echo -e "${BLUE}✓ Reality密钥保留${RESET}"
+echo -e "${BLUE}✓ Socks5用户保留${RESET}"
+echo -e "${BLUE}✓ TLS证书保留${RESET}"
+echo -e "${BLUE}✓ 客户端无需修改${RESET}"
+
 
 
 else
 
 
-echo -e "${RED}Xray启动失败${RESET}"
+echo -e "${RED}[错误] Xray启动失败${RESET}"
 
-journalctl -u xray \
+
+journalctl \
+-u xray \
 -n 50 \
 --no-pager
+
+
+exit 1
 
 
 fi
