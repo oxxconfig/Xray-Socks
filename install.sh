@@ -133,34 +133,37 @@ function install_dependencies() {
     fi
 }
 
+# BUG 修复 1: 修复解压获取子路径，防止覆盖时丢失根路径
 function download_github_files() {
     local target_dir="$1"
     local github_api_url="$2"
     
     mkdir -p "${target_dir}"
-    cd "${target_dir}" || exit 1
     echo -e "${GREEN}[下载核心]${NC} 正在拉取：${github_api_url}"
     
-    rm -f temp_archive.tar.gz
-    if ! curl -sLo temp_archive.tar.gz "${github_api_url}"; then
+    local tmp_tar="/tmp/xray_deploy_temp.tar.gz"
+    local tmp_dir="/tmp/xray_deploy_extract"
+    rm -rf "${tmp_tar}" "${tmp_dir}"
+    
+    if ! curl -sLo "${tmp_tar}" "${github_api_url}"; then
         echo -e "${RED}[错误]${NC} 下载主程序核心失败，请检查 VPS 网络！"
         exit 1
     fi
     
-    if ! tar -xzf temp_archive.tar.gz --no-same-owner 2>/dev/null; then
+    mkdir -p "${tmp_dir}"
+    if ! tar -xzf "${tmp_tar}" -C "${tmp_dir}" --no-same-owner 2>/dev/null; then
         echo -e "${RED}[错误]${NC} 核心包解压失败，下载的文件可能损坏或不完整！"
-        rm -f temp_archive.tar.gz
+        rm -rf "${tmp_tar}" "${tmp_dir}"
         exit 1
     fi
     
     local root_dir
-    root_dir=$(tar -tzf temp_archive.tar.gz | head -1 | cut -f1 -d'/')
+    root_dir=$(find "${tmp_dir}" -maxdepth 1 -mindepth 1 -type d | head -n 1)
     
     if [[ -n "${root_dir}" && -d "${root_dir}" ]]; then
-        cp -r "${root_dir}"/* ./ 2>/dev/null || true
-        rm -rf "${root_dir}"
+        cp -rf "${root_dir}"/* "${target_dir}/"
     fi
-    rm -f temp_archive.tar.gz
+    rm -rf "${tmp_tar}" "${tmp_dir}"
 }
 
 function download_xray_script_files() {
@@ -168,6 +171,7 @@ function download_xray_script_files() {
     download_github_files "$1" "https://github.com/oxxconfig/Xray/archive/refs/heads/main.tar.gz"
 }
 
+# BUG 修复 2: 修复 mv 移动到自身子目录 (subdirectory of itself) 导致的死循环
 function check_xray_script_version() {
     local script_config_github_url="https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/config.json"
     local local_version remote_version
@@ -176,18 +180,15 @@ function check_xray_script_version() {
 
     if [[ "${local_version}" != "${remote_version}" && "${remote_version}" != "0.0.0" ]]; then
         echo -e "${GREEN}[更新提示]${NC} 检测到新版本，自动同步中..."
-        cd "${HOME}" || exit 1
-        local temp_dir="${SCRIPT_CONFIG_DIR}/xray-script-temp"
-        mkdir -p "${temp_dir}"
+        
+        # 将临时下载目录放到 /tmp 避开与 SCRIPT_CONFIG_DIR 的路径嵌套冲突
+        local temp_dir="/tmp/xray-script-temp-update"
+        rm -rf "${temp_dir}" && mkdir -p "${temp_dir}"
         download_xray_script_files "${temp_dir}"
         
-        if [[ -n "${PROJECT_ROOT}" && "${PROJECT_ROOT}" != "/" && "${PROJECT_ROOT}" != "/root" ]]; then
-            rm -rf "${PROJECT_ROOT}"
-        fi
+        cp -rf "${temp_dir}"/* "${PROJECT_ROOT}/"
+        rm -rf "${temp_dir}"
         
-        mv -f "${temp_dir}" "${PROJECT_ROOT}"
-        rm -f "${CUR_DIR}/${CUR_FILE}"
-        cp -f "${PROJECT_ROOT}/install.sh" "${CUR_DIR}/${CUR_FILE}"
         sed -i "s|${local_version}|${remote_version}|" "${SCRIPT_CONFIG_PATH}" 2>/dev/null
         echo -e "${GREEN}[更新提示]${NC} 更新完成，正在恢复参数重新载入..."
         
@@ -260,7 +261,7 @@ function main() {
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-# 3. 把菜单脚本独立写到 /usr/local/bin/xray-menu，绝对不破坏真正的二进制程序 /usr/local/bin/xray
+    # 3. 把菜单脚本独立写到 /usr/local/bin/xray-menu，绝对不破坏真正的二进制程序 /usr/local/bin/xray
     cat << 'EOF' > /usr/local/bin/xray-menu
 #!/usr/bin/env bash
 if [ -f "/usr/local/xray-script/core/main.sh" ]; then
