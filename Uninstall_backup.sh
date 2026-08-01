@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 节点无损全自动重装脚本（完美同步与补全版）
+# Xray 节点无损全自动重装脚本（环境变量防死锁终极版）
 # =============================================================================
 
 set -e
+
+# 1. 强制初始化系统语言环境变量，防止 install.sh 报 null/core/main.sh 错误
+export SYS_LANG="zh_CN"
+export LANG="zh_CN.UTF-8"
 
 BACKUP_DIR="/root/xray_config_backup"
 XRAY_DIR="/usr/local/etc/xray"
@@ -36,7 +40,7 @@ fi
 
 # 备份 SSL 证书
 if [ -d "/etc/ssl" ]; then
-    cp -a /etc/ssl "${BACKUP_DIR}/ssl"
+    cp -a /etc/ssl "${BACKUP_DIR}/ssl" 2>/dev/null || true
 fi
 
 # =============================================================================
@@ -50,7 +54,7 @@ rm -f /usr/local/bin/xray
 rm -rf /usr/local/share/xray /usr/local/etc/xray
 
 # =============================================================================
-# 3. 重新安装
+# 3. 重新安装（带环境变量注入）
 # =============================================================================
 echo -e "\n${YELLOW}[*] 步骤 3/5: 下载并重新安装 Xray 主环境...${RESET}"
 rm -f install.sh
@@ -58,13 +62,17 @@ rm -f install.sh
 curl --connect-timeout 10 --retry 3 -sSO https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/install.sh
 sed -i 's/\r$//' install.sh
 
-bash install.sh --vision || {
-    echo -e "${RED}[失败] Xray 安装脚本执行失败${RESET}"
+# 传入环境变量并执行安装
+SYS_LANG="zh_CN" bash install.sh --vision
+
+# 强制检测核心程序是否安装成功
+if [ ! -f "/usr/local/bin/xray" ]; then
+    echo -e "${RED}[严重错误] install.sh 未能成功编译安装 /usr/local/bin/xray，重装中断！${RESET}"
     exit 1
-}
+fi
 
 # =============================================================================
-# 4. 恢复配置 + 重新生成面板变量 (解决 pbk 为空 & i18n/null.json 报错)
+# 4. 恢复配置 + 重新生成面板变量
 # =============================================================================
 if [ "${HAS_BACKUP}" -eq 1 ]; then
     echo -e "\n${YELLOW}[*] 步骤 4/5: 恢复节点配置并修复面板公钥与语言...${RESET}"
@@ -80,22 +88,17 @@ if [ "${HAS_BACKUP}" -eq 1 ]; then
         cp -a "${BACKUP_DIR}/ssl"/* /etc/ssl/ 2>/dev/null || true
     fi
 
-    # 3. 修复面板：确保语言变量存在，防止寻找 null.json
-    if [ -d "${SCRIPT_DIR}" ]; then
-        # 强制指定默认语言为 zh_CN (防止 i18n/null.json 报错)
-        echo "zh_CN" > "${SCRIPT_DIR}/lang" 2>/dev/null || true
-        
-        # 同步 config.json 给面板
-        cp -f "${XRAY_DIR}/config.json" "${SCRIPT_DIR}/config.json" 2>/dev/null || true
+    # 3. 修复面板：锁定语言并同步重新计算的 PublicKey
+    mkdir -p "${SCRIPT_DIR}"
+    echo "zh_CN" > "${SCRIPT_DIR}/lang" 2>/dev/null || true
+    cp -f "${XRAY_DIR}/config.json" "${SCRIPT_DIR}/config.json" 2>/dev/null || true
 
-        # 核心关键：从旧 config.json 提取 PrivateKey，现场用 xray 计算并写回 public_key
-        PRIV_KEY=$(grep -oP '"privateKey":\s*"\K[^"]+' "${XRAY_DIR}/config.json" 2>/dev/null || true)
-        if [ -n "${PRIV_KEY}" ] && [ -x "/usr/local/bin/xray" ]; then
-            PUB_KEY=$(/usr/local/bin/xray x25519 -i "${PRIV_KEY}" 2>/dev/null | grep -i "Public key" | awk '{print $3}' || true)
-            if [ -n "${PUB_KEY}" ]; then
-                echo "${PUB_KEY}" > "${SCRIPT_DIR}/public_key" 2>/dev/null || true
-                echo -e "${GREEN}[✓] 已成功根据旧私钥计算并同步恢复 PublicKey: ${PUB_KEY}${RESET}"
-            fi
+    PRIV_KEY=$(grep -oP '"privateKey":\s*"\K[^"]+' "${XRAY_DIR}/config.json" 2>/dev/null || true)
+    if [ -n "${PRIV_KEY}" ] && [ -x "/usr/local/bin/xray" ]; then
+        PUB_KEY=$(/usr/local/bin/xray x25519 -i "${PRIV_KEY}" 2>/dev/null | grep -i "Public key" | awk '{print $3}' || true)
+        if [ -n "${PUB_KEY}" ]; then
+            echo "${PUB_KEY}" > "${SCRIPT_DIR}/public_key" 2>/dev/null || true
+            echo -e "${GREEN}[✓] 自动推算并更新恢复 PublicKey: ${PUB_KEY}${RESET}"
         fi
     fi
 fi
@@ -105,15 +108,10 @@ fi
 # =============================================================================
 echo -e "\n${YELLOW}[*] 步骤 5/5: 检查配置合法性并启动服务...${RESET}"
 
-if command -v xray >/dev/null 2>&1; then
-    xray run -test -config "${XRAY_DIR}/config.json" || {
-        echo -e "${RED}[!] Xray 配置文件语法错误！${RESET}"
-        exit 1
-    }
-else
-    echo -e "${RED}[!] 未检测到 Xray 可执行文件${RESET}"
+xray run -test -config "${XRAY_DIR}/config.json" || {
+    echo -e "${RED}[!] Xray 配置文件语法错误！${RESET}"
     exit 1
-fi
+}
 
 systemctl daemon-reload
 systemctl restart xray
@@ -124,8 +122,8 @@ if systemctl is-active --quiet xray; then
     echo -e "${GREEN}=================================${RESET}"
     echo -e "${GREEN}   完美成功：节点无损恢复完成   ${RESET}"
     echo -e "${GREEN}=================================${RESET}"
-    echo -e "${BLUE}PublicKey 已经重新自动计算补全，pbk 不再为空！${RESET}"
-    echo -e "${BLUE}语言变量已锁定为 zh_CN，面板不会再找不到 i18n 文件！${RESET}"
+    echo -e "${BLUE}UUID / Reality / Socks5 均保持原样${RESET}"
+    echo -e "${BLUE}客户端无需修改，xray-info 显示已同步！${RESET}"
 else
     echo -e "${RED}[!] Xray 启动失败，请检查日志：${RESET}"
     journalctl -u xray -n 30 --no-pager
