@@ -3,6 +3,8 @@
 # Xray 无损全自动重装脚本（完全同步核心配置 + 面板缓存）
 # =============================================================================
 
+set -e
+
 BACKUP_DIR="/tmp/xray_config_backup"
 rm -rf "${BACKUP_DIR}" && mkdir -p "${BACKUP_DIR}"
 
@@ -27,33 +29,42 @@ else
 fi
 
 echo -e "\n\033[33m[*]\033[0m 步骤 2/4: 清理旧版本程序..."
-systemctl stop xray 2>/dev/null
-systemctl disable xray 2>/dev/null
+systemctl stop xray 2>/dev/null || true
+systemctl disable xray 2>/dev/null || true
 rm -rf /usr/local/bin/xray /usr/local/share/xray /usr/local/etc/xray "${HOME}/.xray-script"
 
 echo -e "\n\033[33m[*]\033[0m 步骤 3/4: 触发一键安装脚本..."
 rm -f install.sh
 curl --connect-timeout 10 --retry 3 -sSO https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/install.sh
 sed -i 's/\r$//' install.sh
-bash install.sh --vision
+SYS_LANG="zh_CN" bash install.sh --vision
 
 # =============================================================================
 # 关键还原动作：同时还原核心配置 + 面板记录
 # =============================================================================
 if [ ${HAS_BACKUP} -eq 1 ]; then
     echo -e "\n\033[33m[*]\033[0m 步骤 4/4: 强制同步还原旧节点与面板信息..."
-    systemctl stop xray 2>/dev/null
+    systemctl stop xray 2>/dev/null || true
     
     # 还原 Xray 配置
+    mkdir -p /usr/local/etc/xray
     cp -aT "${BACKUP_DIR}/xray" /usr/local/etc/xray
     
-    # 还原面板数据缓存
+    # 还原面板数据缓存（连同 public_key 一起带回）
     if [ -d "${BACKUP_DIR}/xray-script" ]; then
         mkdir -p "${HOME}/.xray-script"
         cp -aT "${BACKUP_DIR}/xray-script" "${HOME}/.xray-script"
     fi
     
+    # 校验并重启
+    /usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
     systemctl restart xray
+    
     echo -e "\033[32m[完美成功]\033[0m 旧节点及面板信息（UUID/PBK/Socks5）已全部同步复原！"
-    echo -e "\033[36m👉 客户端无需做任何更改，xray-info 亦已恢复旧公钥显示！\033[0m"
+    
+    # 自动调用面板展示
+    if [ -x "/usr/local/bin/xray-info" ]; then
+        echo -e "\n\033[36m👉 正在调用面板验证最终配置：\033[0m"
+        /usr/local/bin/xray-info
+    fi
 fi
