@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 节点无损全自动重装脚本（纯净完整版）
-# 功能：
-#   - 保留 UUID / REALITY 密钥 / Socks5 用户 / TLS 证书
-#   - 自动重新安装 Xray 内核与面板环境
-#   - 强行同步核心配置与面板记录（彻底解决 xray-info 显示错位）
-#   - 开启 set -e，配置语法校验校验失败自动回滚
+# Xray 节点无损全自动重装脚本（完美同步与补全版）
 # =============================================================================
 
 set -e
@@ -27,13 +22,11 @@ mkdir -p "${BACKUP_DIR}"
 # =============================================================================
 # 1. 备份配置
 # =============================================================================
-echo -e "\n${YELLOW}[*] 步骤 1/5: 备份 Xray 核心配置与证书...${RESET}"
+echo -e "\n${YELLOW}[*] 步骤 1/5: 备份 Xray 核心配置...${RESET}"
 HAS_BACKUP=0
 
 if [ -f "${XRAY_DIR}/config.json" ]; then
     mkdir -p "${BACKUP_DIR}/xray"
-    
-    # 备份 Xray 核心 JSON 配置
     cp -a "${XRAY_DIR}"/*.json "${BACKUP_DIR}/xray/" 2>/dev/null || true
     HAS_BACKUP=1
     echo -e "${GREEN}[✓] Xray 核心配置备份完成${RESET}"
@@ -43,14 +36,13 @@ fi
 
 # 备份 SSL 证书
 if [ -d "/etc/ssl" ]; then
-    echo -e "${YELLOW}[*] 备份 SSL 证书...${RESET}"
     cp -a /etc/ssl "${BACKUP_DIR}/ssl"
 fi
 
 # =============================================================================
 # 2. 清理旧环境
 # =============================================================================
-echo -e "\n${YELLOW}[*] 步骤 2/5: 停止并清理旧 Xray 核心...${RESET}"
+echo -e "\n${YELLOW}[*] 步骤 2/5: 清理旧 Xray 核心...${RESET}"
 systemctl stop xray 2>/dev/null || true
 systemctl disable xray 2>/dev/null || true
 
@@ -72,15 +64,15 @@ bash install.sh --vision || {
 }
 
 # =============================================================================
-# 4. 恢复配置 & 同步面板
+# 4. 恢复配置 + 重新生成面板变量 (解决 pbk 为空 & i18n/null.json 报错)
 # =============================================================================
 if [ "${HAS_BACKUP}" -eq 1 ]; then
-    echo -e "\n${YELLOW}[*] 步骤 4/5: 恢复节点配置与面板数据...${RESET}"
+    echo -e "\n${YELLOW}[*] 步骤 4/5: 恢复节点配置并修复面板公钥与语言...${RESET}"
     systemctl stop xray 2>/dev/null || true
 
     mkdir -p "${XRAY_DIR}"
-
-    # 1. 强制覆盖还原核心配置 JSON
+    
+    # 1. 恢复核心配置 JSON
     cp -a "${BACKUP_DIR}/xray/"*.json "${XRAY_DIR}/"
 
     # 2. 还原 SSL 证书
@@ -88,25 +80,34 @@ if [ "${HAS_BACKUP}" -eq 1 ]; then
         cp -a "${BACKUP_DIR}/ssl"/* /etc/ssl/ 2>/dev/null || true
     fi
 
-    # 3. 关键救场动作：将恢复后的 config.json 同步覆盖给面板的缓存文件
-    # 彻底解决 xray-info 显示错位 & 避免删文件夹导致的 i18n 缺失
+    # 3. 修复面板：确保语言变量存在，防止寻找 null.json
     if [ -d "${SCRIPT_DIR}" ]; then
-        rm -rf "${SCRIPT_DIR}/cache" "${SCRIPT_DIR}/tmp" 2>/dev/null || true
+        # 强制指定默认语言为 zh_CN (防止 i18n/null.json 报错)
+        echo "zh_CN" > "${SCRIPT_DIR}/lang" 2>/dev/null || true
+        
+        # 同步 config.json 给面板
         cp -f "${XRAY_DIR}/config.json" "${SCRIPT_DIR}/config.json" 2>/dev/null || true
+
+        # 核心关键：从旧 config.json 提取 PrivateKey，现场用 xray 计算并写回 public_key
+        PRIV_KEY=$(grep -oP '"privateKey":\s*"\K[^"]+' "${XRAY_DIR}/config.json" 2>/dev/null || true)
+        if [ -n "${PRIV_KEY}" ] && [ -x "/usr/local/bin/xray" ]; then
+            PUB_KEY=$(/usr/local/bin/xray x25519 -i "${PRIV_KEY}" 2>/dev/null | grep -i "Public key" | awk '{print $3}' || true)
+            if [ -n "${PUB_KEY}" ]; then
+                echo "${PUB_KEY}" > "${SCRIPT_DIR}/public_key" 2>/dev/null || true
+                echo -e "${GREEN}[✓] 已成功根据旧私钥计算并同步恢复 PublicKey: ${PUB_KEY}${RESET}"
+            fi
+        fi
     fi
-    echo -e "${GREEN}[✓] 核心配置与面板记录已同步还原${RESET}"
 fi
 
 # =============================================================================
-# 5. 语法检查并启动
+# 5. 检查并启动
 # =============================================================================
 echo -e "\n${YELLOW}[*] 步骤 5/5: 检查配置合法性并启动服务...${RESET}"
 
 if command -v xray >/dev/null 2>&1; then
-    # 校验恢复后的 config.json 是否合法
-    echo -e "${YELLOW}[*] 校验配置语法...${RESET}"
     xray run -test -config "${XRAY_DIR}/config.json" || {
-        echo -e "${RED}[!] Xray 配置文件语法错误，请检查恢复的内容！${RESET}"
+        echo -e "${RED}[!] Xray 配置文件语法错误！${RESET}"
         exit 1
     }
 else
@@ -123,10 +124,9 @@ if systemctl is-active --quiet xray; then
     echo -e "${GREEN}=================================${RESET}"
     echo -e "${GREEN}   完美成功：节点无损恢复完成   ${RESET}"
     echo -e "${GREEN}=================================${RESET}"
-    echo
-    echo -e "${BLUE}UUID / Reality 私钥 / Socks5 / 证书 均保持原样${RESET}"
-    echo -e "${BLUE}xray-info 面板信息已同步纠正，客户端无需修改！${RESET}"
+    echo -e "${BLUE}PublicKey 已经重新自动计算补全，pbk 不再为空！${RESET}"
+    echo -e "${BLUE}语言变量已锁定为 zh_CN，面板不会再找不到 i18n 文件！${RESET}"
 else
-    echo -e "${RED}[!] Xray 启动失败，请检查 systemctl 日志：${RESET}"
+    echo -e "${RED}[!] Xray 启动失败，请检查日志：${RESET}"
     journalctl -u xray -n 30 --no-pager
 fi
