@@ -17,7 +17,7 @@ if [ -d "/usr/local/etc/xray" ] && [ -n "$(ls -A /usr/local/etc/xray 2>/dev/null
     HAS_BACKUP=1
 fi
 
-# 2. 备份面板缓存记录目录（确保 xray-info 显示数据不混乱）
+# 2. 备份面板缓存记录目录
 if [ -d "${HOME}/.xray-script" ]; then
     cp -aT "${HOME}/.xray-script" "${BACKUP_DIR}/xray-script"
 fi
@@ -50,7 +50,7 @@ if [ ${HAS_BACKUP} -eq 1 ]; then
     mkdir -p /usr/local/etc/xray
     cp -aT "${BACKUP_DIR}/xray" /usr/local/etc/xray
     
-    # 还原面板数据缓存（连同 public_key 一起带回）
+    # 还原面板数据缓存
     if [ -d "${BACKUP_DIR}/xray-script" ]; then
         mkdir -p "${HOME}/.xray-script"
         cp -aT "${BACKUP_DIR}/xray-script" "${HOME}/.xray-script"
@@ -59,6 +59,13 @@ if [ ${HAS_BACKUP} -eq 1 ]; then
     # 校验并重启
     /usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
     systemctl restart xray
+    
+    # -------------------------------------------------------------------------
+    # 【新增关键代码】强行清空 Bash 路径缓存，并重新载入环境变量
+    # -------------------------------------------------------------------------
+    hash -r 2>/dev/null || true
+    unalias xray 2>/dev/null || true
+    [ -f ~/.bashrc ] && source ~/.bashrc 2>/dev/null || true
     
     echo -e "\033[32m[完美成功]\033[0m 旧节点及面板信息（UUID/PBK/Socks5）已全部同步复原！"
     
