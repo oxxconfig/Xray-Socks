@@ -261,11 +261,11 @@ function main() {
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-    # 1. 创建独立菜单入口 (不用 EOF，用单引号拼接保证无任何格式变形)
+    # 1. 创建独立菜单入口
     printf '#!/usr/bin/env bash\nif [ -f "/usr/local/xray-script/core/main.sh" ]; then\n    exec bash /usr/local/xray-script/core/main.sh "$@"\nelse\n    echo "错误: 未找到 Xray 管理脚本！"\n    exit 1\nfi\n' > /usr/local/bin/xray-menu
     chmod +x /usr/local/bin/xray-menu
 
-    # 2. 软链接无感替换，保证任何终端跳转菜单
+    # 2. 软链接无感替换，终端跳转菜单
     if [ -f "/usr/local/bin/xray" ] && [ ! -L "/usr/local/bin/xray" ]; then
         mv -f /usr/local/bin/xray /usr/local/bin/xray-core
         if [ -f "/etc/systemd/system/xray.service" ]; then
