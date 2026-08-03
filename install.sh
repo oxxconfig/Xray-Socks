@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 全自动部署与环境优化脚本 (纯净标准版)
+# Xray 全自动部署与环境优化脚本 (路径解耦纯净版)
 # =============================================================================
 
 # 1. 严格权限断言
@@ -266,15 +266,31 @@ function main() {
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-    # 1. 独立生成管理菜单命令为 /usr/local/bin/xray-menu
-    printf '#!/usr/bin/env bash\nif [ -f "/usr/local/xray-script/core/main.sh" ]; then\n    exec bash /usr/local/xray-script/core/main.sh "$@"\nelse\n    echo "错误: 未找到 Xray 管理脚本！"\n    exit 1\nfi\n' > /usr/local/bin/xray-menu
-    chmod +x /usr/local/bin/xray-menu
+    # 1. 确保真正官方二进制文件存放于 /usr/bin/xray
+    if [ -f "/usr/local/bin/xray" ] && [ "$(file -b /usr/local/bin/xray | grep -i ELF)" != "" ]; then
+        mv -f /usr/local/bin/xray /usr/bin/xray
+    fi
 
-    # 2. 确保守护进程正常重载启动
-    systemctl daemon-reload
-    systemctl restart xray 2>/dev/null || true
+    # 2. 终端命令入口：用户直接输入 xray，运行位于 /usr/local/bin/xray 的管理菜单
+    printf '#!/usr/bin/env bash\nif [ -f "/usr/local/xray-script/core/main.sh" ]; then\n    exec bash /usr/local/xray-script/core/main.sh "$@"\nelse\n    echo "错误: 未找到 Xray 管理脚本！"\n    exit 1\nfi\n' > /usr/local/bin/xray
+    chmod +x /usr/local/bin/xray
 
-    # 3. 执行并打印 xray 和 socks5 看板信息
+    # 3. 守护服务直接指定绝对路径 /usr/bin/xray，不受 PATH 顺序影响
+    if [ -f "/etc/systemd/system/xray.service" ]; then
+        sed -i 's|ExecStart=.*|ExecStart=/usr/bin/xray run -config /usr/local/etc/xray/config.json|g' /etc/systemd/system/xray.service
+        
+        # 排除包含 overwrite 配置的干扰（如果有 drop-in 配置）
+        if [ -d "/etc/systemd/system/xray.service.d" ]; then
+            for conf in /etc/systemd/system/xray.service.d/*.conf; do
+                [ -f "$conf" ] && sed -i 's|ExecStart=.*|ExecStart=/usr/bin/xray run -config /usr/local/etc/xray/config.json|g' "$conf"
+            done
+        fi
+        
+        systemctl daemon-reload
+        systemctl restart xray 2>/dev/null || true
+    fi
+
+    # 4. 执行并打印 xray 和 socks5 看板信息
     if [ -x "/usr/local/bin/xray-info" ]; then
         echo ""
         /usr/local/bin/xray-info
