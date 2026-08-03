@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 全自动部署与环境优化脚本
+# Xray 全自动部署与环境优化脚本 (无感软链接版)
 # =============================================================================
 
 # 1. 严格权限断言
@@ -9,13 +9,13 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# 2. 全局环境变量压制（全面禁绝弹窗交互）
+# 2. 全局环境变量压制
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/snap/bin
 export PATH
 
-# 3. 备份原始参数，防止 while 消费导致更新功能丢失参数
+# 3. 备份原始参数
 ORIGINAL_ARGS=("$@")
 
 readonly GREEN='\033[32m'
@@ -53,12 +53,9 @@ function init_env_optimization() {
     sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
     sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
 
-    cat << 'EOF' >> /etc/sysctl.conf
+    grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf || echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+    grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf || echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
 
-# Network Optimization By Xray Deployer
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=bbr
-EOF
     sysctl -p >/dev/null 2>&1
 
     if type iptables >/dev/null 2>&1; then
@@ -66,7 +63,6 @@ EOF
             iptables -I INPUT -p tcp --dport 443 -j ACCEPT
             echo -e "${GREEN}[基础配置]${NC} 防火墙已放行 TCP 443 端口"
             
-            # 持久化规则保存
             if type iptables-save >/dev/null 2>&1; then
                 iptables-save > /etc/iptables.rules 2>/dev/null || true
             fi
@@ -264,39 +260,29 @@ function main() {
     echo -e "${GREEN}[部署完成]${NC} 前置依赖与系统优化已就绪，正在唤起 Xray 主内核业务脚本..."
     echo "--------------------------------------------------------"
     
-    # 1. 隔离标准输入唤起安装，防止卡在 STDIN 监听
     bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}" </dev/null
 
-    # 2. 部署并挂载通用看板工具 xray-info
     echo -e "\n${GREEN}[看板配置]${NC} 正在挂载 Xray 全能信息看板工具..."
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-    # 3. 把菜单脚本独立写到 /usr/local/bin/xray-menu，绝对不破坏真正的二进制程序 /usr/local/bin/xray
-    cat << 'EOF' > /usr/local/bin/xray-menu
-#!/usr/bin/env bash
-if [ -f "/usr/local/xray-script/core/main.sh" ]; then
-    exec bash /usr/local/xray-script/core/main.sh "$@"
-else
-    echo "错误: 未找到 Xray 管理脚本！"
-    exit 1
-fi
-EOF
+    # 1. 创建独立菜单入口 (不用 EOF，用单引号拼接保证无任何格式变形)
+    printf '#!/usr/bin/env bash\nif [ -f "/usr/local/xray-script/core/main.sh" ]; then\n    exec bash /usr/local/xray-script/core/main.sh "$@"\nelse\n    echo "错误: 未找到 Xray 管理脚本！"\n    exit 1\nfi\n' > /usr/local/bin/xray-menu
     chmod +x /usr/local/bin/xray-menu
 
-    # 4. 给终端配置文件写入 alias，并提供双重兜底
-    for rc in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile"; do
-        if [ -f "$rc" ]; then
-            sed -i '/alias xray=/d' "$rc" 2>/dev/null || true
-            echo "alias xray='/usr/local/bin/xray-menu'" >> "$rc"
+    # 2. 软链接无感替换，保证任何终端输入 xray 均跳菜单，同时不卡死批量运维
+    if [ -f "/usr/local/bin/xray" ] && [ ! -L "/usr/local/bin/xray" ]; then
+        mv -f /usr/local/bin/xray /usr/local/bin/xray-core
+        if [ -f "/etc/systemd/system/xray.service" ]; then
+            sed -i 's|/usr/local/bin/xray|/usr/local/bin/xray-core|g' /etc/systemd/system/xray.service
+            systemctl daemon-reload
+            systemctl restart xray 2>/dev/null || true
         fi
-    done
+    fi
 
-    # 内存别名直接注入（修复当前 SSH 会话直接敲 xray 报 STDIN 的问题）
-    alias xray='/usr/local/bin/xray-menu' 2>/dev/null || true
-    hash -r 2>/dev/null || true
+    # 快捷链接挂载
+    ln -sf /usr/local/bin/xray-menu /usr/local/bin/xray
 
-    # 5. 自动唤醒并打印看板内容
     if [ -x "/usr/local/bin/xray-info" ]; then
         echo ""
         /usr/local/bin/xray-info
