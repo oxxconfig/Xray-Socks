@@ -1,4 +1,3 @@
-cat << 'EOF' > /usr/local/bin/Uninstall_backup.sh
 #!/usr/bin/env bash
 # =============================================================================
 # Xray 独立控制面板：备份、恢复与彻底卸载
@@ -40,12 +39,14 @@ function restore_config() {
         echo "  [$((i+1))] $(basename "${files[$i]}")"
     done
 
+    # 兼容终端tty输入
+    exec < /dev/tty
     read -rp "输入序号: " choice
     if [[ "$choice" -ge 1 && "$choice" -le "${#files[@]}" ]]; then
         local target="${files[$((choice-1))]}"
         mkdir -p /usr/local/etc/xray
         cp "${target}" "${CONFIG_PATH}"
-        systemctl restart xray
+        systemctl restart xray 2>/dev/null || true
         echo -e "${GREEN}[成功] 已成功恢复配置并重启 Xray 服务！${NC}"
     else
         echo -e "${RED}[错误] 无效选择！${NC}"
@@ -53,35 +54,49 @@ function restore_config() {
 }
 
 function uninstall_xray() {
-    read -rp "确定要彻底卸载 Xray 及其所有服务配置吗？[y/N]: " confirm
-    if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        systemctl stop xray 2>/dev/null || true
-        systemctl disable xray 2>/dev/null || true
-        
-        # 卸载服务和路径
-        rm -f /etc/systemd/system/xray.service
-        systemctl daemon-reload
-        
-        rm -rf /usr/local/etc/xray
-        rm -rf /usr/local/share/xray
-        rm -rf /usr/local/xray-script
-        rm -rf ~/.xray-script
-        rm -f /usr/bin/xray
-        rm -f /usr/local/bin/xray
-        rm -f /usr/local/bin/xray-info
-        
-        echo -e "${GREEN}[成功] Xray 节点及相关所有脚本已清理完毕！${NC}"
-    else
-        echo -e "${YELLOW}已取消卸载。${NC}"
-    fi
+    systemctl stop xray 2>/dev/null || true
+    systemctl disable xray 2>/dev/null || true
+    
+    # 清理服务与文件
+    rm -f /etc/systemd/system/xray.service
+    systemctl daemon-reload
+    
+    rm -rf /usr/local/etc/xray
+    rm -rf /usr/local/share/xray
+    rm -rf /usr/local/xray-script
+    rm -rf ~/.xray-script
+    rm -f /usr/bin/xray
+    rm -f /usr/local/bin/xray
+    rm -f /usr/local/bin/xray-info
+    
+    # 清理定时任务
+    crontab -l 2>/dev/null | grep -v 'geodata.sh' | crontab - 2>/dev/null || true
+    
+    echo -e "${GREEN}[成功] Xray 节点及相关所有脚本已完全卸载清理！${NC}"
 }
 
-echo -e "${GREEN}=== Xray 独立管理面板 (备份/恢复/卸载) ===${NC}"
-echo " 1. 备份当前 Xray 节点配置"
-echo " 2. 从已有备份中恢复配置"
-echo " 3. 彻底卸载 Xray 及脚本组件"
-echo " 0. 退出"
-read -rp "请选择操作 [0-3]: " opt
+# 优先获取传入的命令行参数
+opt="$1"
+
+# 如果没有参数，且终端支持交互，则弹出菜单
+if [ -z "$opt" ]; then
+    echo -e "${GREEN}=== Xray 独立管理面板 (备份/恢复/卸载) ===${NC}"
+    echo " 1. 备份当前 Xray 节点配置"
+    echo " 2. 从已有备份中恢复配置"
+    echo " 3. 彻底卸载 Xray 及脚本组件"
+    echo " 0. 退出"
+    
+    # 重定向 stdin 到当前终端，解决管道无法 read 的问题
+    if [ -t 0 ]; then
+        read -rp "请选择操作 [0-3]: " opt
+    elif [ -e /dev/tty ]; then
+        exec < /dev/tty
+        read -rp "请选择操作 [0-3]: " opt
+    else
+        echo -e "${RED}[错误] 在线执行请附加参数！例: curl ... | bash -s -- 3${NC}"
+        exit 1
+    fi
+fi
 
 case "$opt" in
     1) backup_config ;;
@@ -89,6 +104,3 @@ case "$opt" in
     3) uninstall_xray ;;
     *) exit 0 ;;
 esac
-EOF
-
-chmod +x /usr/local/bin/Uninstall_backup.sh
