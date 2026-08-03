@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 全自动部署与环境优化脚本 (终极修复纯净版)
+# Xray 全自动部署与环境优化脚本 (纯净重装版 - 不保留/复用旧配置)
 # =============================================================================
 
 # 1. 严格权限断言
@@ -23,17 +23,12 @@ readonly YELLOW='\033[33m'
 readonly RED='\033[31m'
 readonly NC='\033[0m'
 
-readonly CUR_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
-readonly CUR_FILE="$(basename "$0")"
-
 readonly SCRIPT_CONFIG_DIR="${HOME}/.xray-script"
 readonly SCRIPT_CONFIG_PATH="${SCRIPT_CONFIG_DIR}/config.json"
 
 declare PROJECT_ROOT=''
 declare CORE_DIR=''
 declare QUICK_INSTALL=''
-declare LANG_PARAM='--lang=zh'
-declare FORCE_CHECK_DEPS=0
 
 function _os() {
     if [[ -f "/etc/debian_version" ]]; then
@@ -201,26 +196,27 @@ function main() {
         PROJECT_ROOT="${script_path}"
     fi
 
-    if [[ -z "${PROJECT_ROOT}" || "${PROJECT_ROOT}" == "/" || "${PROJECT_ROOT}" == "/usr" || "${PROJECT_ROOT}" == "/root" || "${PROJECT_ROOT}" == "/home" ]]; then
-        echo -e "${RED}[核心防御] 安全熔断：PROJECT_ROOT 路径异常 (${PROJECT_ROOT})，拒绝执行 rm -rf！\033[0m"
-        exit 1
-    fi
-
     CORE_DIR="${PROJECT_ROOT}/core"
 
-    # 强制清理旧文件并拉取最新脚本
+    # ==================== 彻底解耦改动点 ====================
+    # 强制清理旧脚本目录 AND 旧 Xray 配置文件，绝不读取/恢复旧节点
+    echo -e "${YELLOW}[纯净重建]${NC} 清理旧配置与旧脚本，准备重新生成节点..."
+    systemctl stop xray 2>/dev/null || true
     rm -rf "${PROJECT_ROOT}"
+    rm -rf /usr/local/etc/xray
+    rm -rf /usr/local/share/xray
+    
+    # 彻底重新初始化全新目录结构
+    mkdir -p /usr/local/etc/xray
+    mkdir -p /usr/local/share/xray
+    # ========================================================
+
+    # 下载最新脚本
     download_xray_script_files "${PROJECT_ROOT}"
 
     local json_lang
     json_lang=$(jq --arg language "zh" '.language = $language' "${SCRIPT_CONFIG_PATH}" 2>/dev/null)
     [[ -n "${json_lang}" ]] && echo "${json_lang}" >"${SCRIPT_CONFIG_PATH}"
-
-    # ================= 核心修复点 1 =================
-    # 在唤起业务脚本前，强制创建底层所需的所有目录，防止 jq 写入时报 No such file 错误
-    mkdir -p /usr/local/etc/xray
-    mkdir -p /usr/local/share/xray
-    # ================================================
 
     echo -e "${GREEN}[部署完成]${NC} 前置依赖与系统优化已就绪，正在唤起 Xray 主内核业务脚本..."
     echo "--------------------------------------------------------"
@@ -231,18 +227,15 @@ function main() {
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-    # ================= 核心修复点 2 =================
-    # 确保真正官方二进制文件存放于标准位置 /usr/bin/xray，绝不改名
     if [ -f "/usr/local/bin/xray" ] && [ "$(file -b /usr/local/bin/xray | grep -i ELF)" != "" ]; then
         mv -f /usr/local/bin/xray /usr/bin/xray
     fi
 
-    # 生成全局菜单命令：用户直接输入 xray，呼出管理菜单
+    # 生成全局菜单命令
     printf '#!/usr/bin/env bash\nif [ -f "/usr/local/xray-script/core/main.sh" ]; then\n    exec bash /usr/local/xray-script/core/main.sh "$@"\nelse\n    echo "错误: 未找到 Xray 管理脚本！"\n    exit 1\nfi\n' > /usr/local/bin/xray
     chmod +x /usr/local/bin/xray
 
-    # ================= 核心修复点 3 =================
-    # 全量覆写 systemd 文件，写死 /usr/bin/xray 绝对路径，杜绝 sed 造成的 bad unit file 报错
+    # 服务管理配置
     cat << 'EOF' > /etc/systemd/system/xray.service
 [Unit]
 Description=Xray Service
@@ -263,13 +256,10 @@ RuntimeDirectoryMode=0755
 WantedBy=multi-user.target
 EOF
 
-    # 清理任何可能干扰的残留配置并重启守护进程
     rm -rf /etc/systemd/system/xray.service.d
     systemctl daemon-reload
     systemctl restart xray 2>/dev/null || true
-    # ================================================
 
-    # 执行并打印看板信息
     if [ -x "/usr/local/bin/xray-info" ]; then
         echo ""
         /usr/local/bin/xray-info
