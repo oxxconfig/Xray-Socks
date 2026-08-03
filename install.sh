@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
+# =============================================================================
+# Xray 全自动部署与环境优化脚本
+# =============================================================================
 
-# 1. 严格权限断言 (彻底废除无意义的 sudo)
+# 1. 严格权限断言
 if [ "$EUID" -ne 0 ]; then
     echo -e "\033[31m[错误] 请使用 root 用户运行此脚本！\033[0m"
     exit 1
@@ -130,7 +133,6 @@ function install_dependencies() {
     fi
 }
 
-# BUG 修复 1: 修复解压获取子路径，防止覆盖时丢失根路径
 function download_github_files() {
     local target_dir="$1"
     local github_api_url="$2"
@@ -168,7 +170,6 @@ function download_xray_script_files() {
     download_github_files "$1" "https://github.com/oxxconfig/Xray/archive/refs/heads/main.tar.gz"
 }
 
-# BUG 修复 2: 修复 mv 移动到自身子目录 (subdirectory of itself) 导致的死循环
 function check_xray_script_version() {
     local script_config_github_url="https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/config.json"
     local local_version remote_version
@@ -179,7 +180,6 @@ function check_xray_script_version() {
         echo -e "${GREEN}[更新提示]${NC} 检测到新版本，自动同步中..."
         cd "${HOME}" || exit 1
         
-        # 使用 /tmp 临时目录，防止路径嵌套 mv 报错
         local temp_dir="/tmp/xray-script-temp"
         mkdir -p "${temp_dir}"
         download_xray_script_files "${temp_dir}"
@@ -192,10 +192,6 @@ function check_xray_script_version() {
         cp -rf "${temp_dir}"/* "${PROJECT_ROOT}/"
         rm -rf "${temp_dir}"
 
-        # ---------------------------------------------------------------------
-        # 【关键修复】：必须把解压出来的最新 config.json 同步到配置文件路径！
-        # 否则 SCRIPT_CONFIG_PATH 里永远是旧版本，导致 exec bash 永远死循环！
-        # ---------------------------------------------------------------------
         if [[ -f "${PROJECT_ROOT}/config.json" ]]; then
             cp -f "${PROJECT_ROOT}/config.json" "${SCRIPT_CONFIG_PATH}"
         else
@@ -288,13 +284,16 @@ fi
 EOF
     chmod +x /usr/local/bin/xray-menu
 
-    # 4. 给当前终端添加 alias：敲 xray 自动打开交互菜单，同时让 systemd 继续使用真正的二进制文件
+    # 4. 给终端配置文件写入 alias，并提供双重兜底
     for rc in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile"; do
         if [ -f "$rc" ]; then
             sed -i '/alias xray=/d' "$rc" 2>/dev/null || true
             echo "alias xray='/usr/local/bin/xray-menu'" >> "$rc"
         fi
     done
+
+    # 内存别名直接注入（修复当前 SSH 会话直接敲 xray 报 STDIN 的问题）
+    alias xray='/usr/local/bin/xray-menu' 2>/dev/null || true
     hash -r 2>/dev/null || true
 
     # 5. 自动唤醒并打印看板内容
