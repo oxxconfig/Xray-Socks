@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# =============================================================================
-# Xray 无损全自动重装脚本（完全同步核心配置 + 面板缓存）
-# =============================================================================
 
 set -e
 
@@ -11,7 +8,7 @@ rm -rf "${BACKUP_DIR}" && mkdir -p "${BACKUP_DIR}"
 echo -e "\033[33m[*]\033[0m 步骤 1/4: 锁定现有节点配置与面板数据..."
 HAS_BACKUP=0
 
-# 1. 备份 Xray 核心配置目录
+# 1. 备份核心配置目录
 if [ -d "/usr/local/etc/xray" ] && [ -n "$(ls -A /usr/local/etc/xray 2>/dev/null)" ]; then
     cp -aT /usr/local/etc/xray "${BACKUP_DIR}/xray"
     HAS_BACKUP=1
@@ -33,15 +30,12 @@ systemctl stop xray 2>/dev/null || true
 systemctl disable xray 2>/dev/null || true
 rm -rf /usr/local/bin/xray /usr/local/share/xray /usr/local/etc/xray "${HOME}/.xray-script"
 
-echo -e "\n\033[33m[*]\033[0m 步骤 3/4: 触发一键安装脚本..."
+echo -e "\n\033[33m[*]\033[0m 步骤 3/4: 触发安装脚本..."
 rm -f install.sh
 curl --connect-timeout 10 --retry 3 -sSO https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/install.sh
 sed -i 's/\r$//' install.sh
 SYS_LANG="zh_CN" bash install.sh --vision
 
-# =============================================================================
-# 关键还原动作：同时还原核心配置 + 面板记录
-# =============================================================================
 if [ ${HAS_BACKUP} -eq 1 ]; then
     echo -e "\n\033[33m[*]\033[0m 步骤 4/4: 强制同步还原旧节点与面板信息..."
     systemctl stop xray 2>/dev/null || true
@@ -60,14 +54,11 @@ if [ ${HAS_BACKUP} -eq 1 ]; then
     /usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
     systemctl restart xray
     
-    # -------------------------------------------------------------------------
-    # 【新增关键代码】强行清空 Bash 路径缓存，并重新载入环境变量
-    # -------------------------------------------------------------------------
     hash -r 2>/dev/null || true
     unalias xray 2>/dev/null || true
     [ -f ~/.bashrc ] && source ~/.bashrc 2>/dev/null || true
     
-    echo -e "\033[32m[完美成功]\033[0m 旧节点及面板信息（UUID/PBK/Socks5）已全部同步复原！"
+    echo -e "\033[32m[完美成功]\033[0m 旧节点及面板信息已全部同步复原！"
     
     # 自动调用面板展示
     if [ -x "/usr/local/bin/xray-info" ]; then
