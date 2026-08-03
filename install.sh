@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 全自动部署与环境优化脚本 (完整修正版)
+# Xray 全自动部署与环境优化脚本 (纯净标准版)
 # =============================================================================
 
 # 1. 严格权限断言
@@ -266,26 +266,15 @@ function main() {
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-    # 1. 生成管理菜单快捷命令入口 (不用 EOF)
+    # 1. 独立生成管理菜单命令为 /usr/local/bin/xray-menu
     printf '#!/usr/bin/env bash\nif [ -f "/usr/local/xray-script/core/main.sh" ]; then\n    exec bash /usr/local/xray-script/core/main.sh "$@"\nelse\n    echo "错误: 未找到 Xray 管理脚本！"\n    exit 1\nfi\n' > /usr/local/bin/xray-menu
     chmod +x /usr/local/bin/xray-menu
 
-    # 2. 将主程序解耦命名为 xray-core，防止与菜单快捷命令同名冲突
-    if [ -f "/usr/local/bin/xray" ] && [ ! -L "/usr/local/bin/xray" ]; then
-        mv -f /usr/local/bin/xray /usr/local/bin/xray-core
-    fi
+    # 2. 确保守护进程正常重载启动
+    systemctl daemon-reload
+    systemctl restart xray 2>/dev/null || true
 
-    # 3. 更新 systemd 服务启动命令，正确指向内核二进制，并重载拉起后台端口监听
-    if [ -f "/etc/systemd/system/xray.service" ]; then
-        sed -i 's|/usr/local/bin/xray |/usr/local/bin/xray-core |g' /etc/systemd/system/xray.service
-        systemctl daemon-reload
-        systemctl restart xray 2>/dev/null || true
-    fi
-
-    # 4. 按键绑定：敲 xray 直接唤起管理菜单
-    ln -sf /usr/local/bin/xray-menu /usr/local/bin/xray
-
-    # 5. 执行并打印 xray 和 socks5 看板信息 (按键 xray-info)
+    # 3. 执行并打印 xray 和 socks5 看板信息
     if [ -x "/usr/local/bin/xray-info" ]; then
         echo ""
         /usr/local/bin/xray-info
