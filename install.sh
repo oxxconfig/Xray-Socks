@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 全自动部署与环境优化脚本 (路径解耦纯净版)
+# Xray 全自动部署与环境优化脚本 (终极修复纯净版)
 # =============================================================================
 
 # 1. 严格权限断言
@@ -162,45 +162,7 @@ function download_github_files() {
 }
 
 function download_xray_script_files() {
-    download_github_files "$1" "https://github.com/oxxconfig/Xray-Socks/archive/refs/heads/main.tar.gz" || \
-    download_github_files "$1" "https://github.com/oxxconfig/Xray/archive/refs/heads/main.tar.gz"
-}
-
-function check_xray_script_version() {
-    local script_config_github_url="https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/config.json"
-    local local_version remote_version
-    local_version="$(jq -r '.version' "${SCRIPT_CONFIG_PATH}" 2>/dev/null || echo "0.0.0")"
-    remote_version="$(curl -fsSL --connect-timeout 5 "$script_config_github_url" | jq -r '.version' 2>/dev/null || echo "0.0.0")"
-
-    if [[ "${local_version}" != "${remote_version}" && "${remote_version}" != "0.0.0" ]]; then
-        echo -e "${GREEN}[更新提示]${NC} 检测到新版本，自动同步中..."
-        cd "${HOME}" || exit 1
-        
-        local temp_dir="/tmp/xray-script-temp"
-        mkdir -p "${temp_dir}"
-        download_xray_script_files "${temp_dir}"
-        
-        if [[ -n "${PROJECT_ROOT}" && "${PROJECT_ROOT}" != "/" && "${PROJECT_ROOT}" != "/root" ]]; then
-            rm -rf "${PROJECT_ROOT}"
-        fi
-        
-        mkdir -p "${PROJECT_ROOT}"
-        cp -rf "${temp_dir}"/* "${PROJECT_ROOT}/"
-        rm -rf "${temp_dir}"
-
-        if [[ -f "${PROJECT_ROOT}/config.json" ]]; then
-            cp -f "${PROJECT_ROOT}/config.json" "${SCRIPT_CONFIG_PATH}"
-        else
-            sed -i "s|${local_version}|${remote_version}|" "${SCRIPT_CONFIG_PATH}" 2>/dev/null
-        fi
-        
-        rm -f "${CUR_DIR}/${CUR_FILE}"
-        cp -f "${PROJECT_ROOT}/install.sh" "${CUR_DIR}/${CUR_FILE}"
-        
-        echo -e "${GREEN}[更新提示]${NC} 更新完成，正在恢复参数重新载入..."
-        
-        exec bash "${CUR_DIR}/${CUR_FILE}" "${ORIGINAL_ARGS[@]}"
-    fi
+    download_github_files "$1" "https://github.com/oxxconfig/Xray-Socks/archive/refs/heads/main.tar.gz"
 }
 
 function main() {
@@ -246,16 +208,19 @@ function main() {
 
     CORE_DIR="${PROJECT_ROOT}/core"
 
-    if [[ -d "${PROJECT_ROOT}" && -f "${CORE_DIR}/main.sh" ]]; then
-        check_xray_script_version "${ORIGINAL_ARGS[@]}"
-    else
-        rm -rf "${PROJECT_ROOT}"
-        download_xray_script_files "${PROJECT_ROOT}"
-    fi
+    # 强制清理旧文件并拉取最新脚本
+    rm -rf "${PROJECT_ROOT}"
+    download_xray_script_files "${PROJECT_ROOT}"
 
     local json_lang
     json_lang=$(jq --arg language "zh" '.language = $language' "${SCRIPT_CONFIG_PATH}" 2>/dev/null)
     [[ -n "${json_lang}" ]] && echo "${json_lang}" >"${SCRIPT_CONFIG_PATH}"
+
+    # ================= 核心修复点 1 =================
+    # 在唤起业务脚本前，强制创建底层所需的所有目录，防止 jq 写入时报 No such file 错误
+    mkdir -p /usr/local/etc/xray
+    mkdir -p /usr/local/share/xray
+    # ================================================
 
     echo -e "${GREEN}[部署完成]${NC} 前置依赖与系统优化已就绪，正在唤起 Xray 主内核业务脚本..."
     echo "--------------------------------------------------------"
@@ -266,31 +231,45 @@ function main() {
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-    # 1. 确保真正官方二进制文件存放于 /usr/bin/xray
+    # ================= 核心修复点 2 =================
+    # 确保真正官方二进制文件存放于标准位置 /usr/bin/xray，绝不改名
     if [ -f "/usr/local/bin/xray" ] && [ "$(file -b /usr/local/bin/xray | grep -i ELF)" != "" ]; then
         mv -f /usr/local/bin/xray /usr/bin/xray
     fi
 
-    # 2. 终端命令入口：用户直接输入 xray，运行位于 /usr/local/bin/xray 的管理菜单
+    # 生成全局菜单命令：用户直接输入 xray，呼出管理菜单
     printf '#!/usr/bin/env bash\nif [ -f "/usr/local/xray-script/core/main.sh" ]; then\n    exec bash /usr/local/xray-script/core/main.sh "$@"\nelse\n    echo "错误: 未找到 Xray 管理脚本！"\n    exit 1\nfi\n' > /usr/local/bin/xray
     chmod +x /usr/local/bin/xray
 
-    # 3. 守护服务直接指定绝对路径 /usr/bin/xray，不受 PATH 顺序影响
-    if [ -f "/etc/systemd/system/xray.service" ]; then
-        sed -i 's|ExecStart=.*|ExecStart=/usr/bin/xray run -config /usr/local/etc/xray/config.json|g' /etc/systemd/system/xray.service
-        
-        # 排除包含 overwrite 配置的干扰（如果有 drop-in 配置）
-        if [ -d "/etc/systemd/system/xray.service.d" ]; then
-            for conf in /etc/systemd/system/xray.service.d/*.conf; do
-                [ -f "$conf" ] && sed -i 's|ExecStart=.*|ExecStart=/usr/bin/xray run -config /usr/local/etc/xray/config.json|g' "$conf"
-            done
-        fi
-        
-        systemctl daemon-reload
-        systemctl restart xray 2>/dev/null || true
-    fi
+    # ================= 核心修复点 3 =================
+    # 全量覆写 systemd 文件，写死 /usr/bin/xray 绝对路径，杜绝 sed 造成的 bad unit file 报错
+    cat << 'EOF' > /etc/systemd/system/xray.service
+[Unit]
+Description=Xray Service
+Documentation=https://github.com/xtls
+After=network.target nss-lookup.target
 
-    # 4. 执行并打印 xray 和 socks5 看板信息
+[Service]
+User=root
+ExecStart=/usr/bin/xray run -config /usr/local/etc/xray/config.json
+Restart=on-failure
+RestartPreventExitStatus=23
+LimitNPROC=10000
+LimitNOFILE=1000000
+RuntimeDirectory=xray
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # 清理任何可能干扰的残留配置并重启守护进程
+    rm -rf /etc/systemd/system/xray.service.d
+    systemctl daemon-reload
+    systemctl restart xray 2>/dev/null || true
+    # ================================================
+
+    # 执行并打印看板信息
     if [ -x "/usr/local/bin/xray-info" ]; then
         echo ""
         /usr/local/bin/xray-info
