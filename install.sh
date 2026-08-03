@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
-# =============================================================================
-# Xray 全自动部署与环境优化脚本 (无感软链接版)
-# =============================================================================
 
-# 1. 严格权限断言
 if [ "$EUID" -ne 0 ]; then
     echo -e "\033[31m[错误] 请使用 root 用户运行此脚本！\033[0m"
     exit 1
 fi
 
-# 2. 全局环境变量压制
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/snap/bin
@@ -61,7 +56,7 @@ function init_env_optimization() {
     if type iptables >/dev/null 2>&1; then
         if ! iptables -L INPUT -n 2>/dev/null | grep -q "dpt:443"; then
             iptables -I INPUT -p tcp --dport 443 -j ACCEPT
-            echo -e "${GREEN}[基础配置]${NC} 防火墙已放行 TCP 443 端口"
+            echo -e "${GREEN}[基础配置]${NC} 防火墙已放行特定端口"
             
             if type iptables-save >/dev/null 2>&1; then
                 iptables-save > /etc/iptables.rules 2>/dev/null || true
@@ -70,7 +65,7 @@ function init_env_optimization() {
                 netfilter-persistent save >/dev/null 2>&1 || true
             fi
         else
-            echo -e "${GREEN}[基础配置]${NC} 防火墙 TCP 443 端口规则已存在，跳过配置"
+            echo -e "${GREEN}[基础配置]${NC} 防火墙端口规则已存在，跳过配置"
         fi
     fi
 }
@@ -141,7 +136,7 @@ function download_github_files() {
     rm -rf "${tmp_tar}" "${tmp_dir}"
     
     if ! curl -sLo "${tmp_tar}" "${github_api_url}"; then
-        echo -e "${RED}[错误]${NC} 下载主程序核心失败，请检查 VPS 网络！"
+        echo -e "${RED}[错误]${NC} 下载主程序核心失败，请检查网络！"
         exit 1
     fi
     
@@ -257,12 +252,12 @@ function main() {
     json_lang=$(jq --arg language "zh" '.language = $language' "${SCRIPT_CONFIG_PATH}" 2>/dev/null)
     [[ -n "${json_lang}" ]] && echo "${json_lang}" >"${SCRIPT_CONFIG_PATH}"
 
-    echo -e "${GREEN}[部署完成]${NC} 前置依赖与系统优化已就绪，正在唤起 Xray 主内核业务脚本..."
+    echo -e "${GREEN}[部署完成]${NC} 前置依赖与系统优化已就绪，正在唤起主内核业务脚本..."
     echo "--------------------------------------------------------"
     
     bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}" </dev/null
 
-    echo -e "\n${GREEN}[看板配置]${NC} 正在挂载 Xray 全能信息看板工具..."
+    echo -e "\n${GREEN}[看板配置]${NC} 正在挂载信息看板工具..."
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
@@ -270,7 +265,7 @@ function main() {
     printf '#!/usr/bin/env bash\nif [ -f "/usr/local/xray-script/core/main.sh" ]; then\n    exec bash /usr/local/xray-script/core/main.sh "$@"\nelse\n    echo "错误: 未找到 Xray 管理脚本！"\n    exit 1\nfi\n' > /usr/local/bin/xray-menu
     chmod +x /usr/local/bin/xray-menu
 
-    # 2. 软链接无感替换，保证任何终端输入 xray 均跳菜单，同时不卡死批量运维
+    # 2. 软链接无感替换，保证任何终端跳转菜单
     if [ -f "/usr/local/bin/xray" ] && [ ! -L "/usr/local/bin/xray" ]; then
         mv -f /usr/local/bin/xray /usr/local/bin/xray-core
         if [ -f "/etc/systemd/system/xray.service" ]; then
