@@ -1,68 +1,94 @@
+cat << 'EOF' > /usr/local/bin/Uninstall_backup.sh
 #!/usr/bin/env bash
+# =============================================================================
+# Xray 独立控制面板：备份、恢复与彻底卸载
+# =============================================================================
 
-set -e
+readonly BACKUP_DIR="/var/backups/xray-backups"
+readonly CONFIG_PATH="/usr/local/etc/xray/config.json"
+readonly GREEN='\033[32m'
+readonly RED='\033[31m'
+readonly YELLOW='\033[33m'
+readonly NC='\033[0m'
 
-BACKUP_DIR="/tmp/xray_config_backup"
-rm -rf "${BACKUP_DIR}" && mkdir -p "${BACKUP_DIR}"
-
-echo -e "\033[33m[*]\033[0m 步骤 1/4: 锁定现有节点配置与面板数据..."
-HAS_BACKUP=0
-
-# 1. 备份核心配置目录
-if [ -d "/usr/local/etc/xray" ] && [ -n "$(ls -A /usr/local/etc/xray 2>/dev/null)" ]; then
-    cp -aT /usr/local/etc/xray "${BACKUP_DIR}/xray"
-    HAS_BACKUP=1
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${RED}[错误] 请使用 root 用户运行此脚本！${NC}"
+    exit 1
 fi
 
-# 2. 备份面板缓存记录目录
-if [ -d "${HOME}/.xray-script" ]; then
-    cp -aT "${HOME}/.xray-script" "${BACKUP_DIR}/xray-script"
-fi
+mkdir -p "${BACKUP_DIR}"
 
-if [ ${HAS_BACKUP} -eq 1 ]; then
-    echo -e "\033[32m[✓]\033[0m 旧节点配置与面板数据已成功锁定！"
-else
-    echo -e "\033[31m[!]\033[0m 未找到旧配置，本次将进行全新部署。"
-fi
-
-echo -e "\n\033[33m[*]\033[0m 步骤 2/4: 清理旧版本程序..."
-systemctl stop xray 2>/dev/null || true
-systemctl disable xray 2>/dev/null || true
-rm -rf /usr/local/bin/xray /usr/local/share/xray /usr/local/etc/xray "${HOME}/.xray-script"
-
-echo -e "\n\033[33m[*]\033[0m 步骤 3/4: 触发安装脚本..."
-rm -f install.sh
-curl --connect-timeout 10 --retry 3 -sSO https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/install.sh
-sed -i 's/\r$//' install.sh
-SYS_LANG="zh_CN" bash install.sh --vision
-
-if [ ${HAS_BACKUP} -eq 1 ]; then
-    echo -e "\n\033[33m[*]\033[0m 步骤 4/4: 强制同步还原旧节点与面板信息..."
-    systemctl stop xray 2>/dev/null || true
-    
-    # 还原 Xray 配置
-    mkdir -p /usr/local/etc/xray
-    cp -aT "${BACKUP_DIR}/xray" /usr/local/etc/xray
-    
-    # 还原面板数据缓存
-    if [ -d "${BACKUP_DIR}/xray-script" ]; then
-        mkdir -p "${HOME}/.xray-script"
-        cp -aT "${BACKUP_DIR}/xray-script" "${HOME}/.xray-script"
+function backup_config() {
+    if [ ! -f "${CONFIG_PATH}" ]; then
+        echo -e "${RED}[错误] 未检测到当前运行的 Xray 配置文件 (${CONFIG_PATH})！${NC}"
+        return 1
     fi
-    
-    # 校验并重启
-    /usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
-    systemctl restart xray
-    
-    hash -r 2>/dev/null || true
-    unalias xray 2>/dev/null || true
-    [ -f ~/.bashrc ] && source ~/.bashrc 2>/dev/null || true
-    
-    echo -e "\033[32m[完美成功]\033[0m 旧节点及面板信息已全部同步复原！"
-    
-    # 自动调用面板展示
-    if [ -x "/usr/local/bin/xray-info" ]; then
-        echo -e "\n\033[36m👉 正在调用面板验证最终配置：\033[0m"
-        /usr/local/bin/xray-info
+    local file_name="xray_config_$(date +%Y%m%d_%H%M%S).json"
+    cp "${CONFIG_PATH}" "${BACKUP_DIR}/${file_name}"
+    echo -e "${GREEN}[成功] 配置文件已成功备份至：${BACKUP_DIR}/${file_name}${NC}"
+}
+
+function restore_config() {
+    local files=($(ls "${BACKUP_DIR}"/*.json 2>/dev/null))
+    if [ ${#files[@]} -eq 0 ]; then
+        echo -e "${RED}[错误] 备份目录 ${BACKUP_DIR} 中没有找到任何备份文件！${NC}"
+        return 1
     fi
-fi
+
+    echo -e "${YELLOW}请选择要恢复的备份文件：${NC}"
+    for i in "${!files[@]}"; do
+        echo "  [$((i+1))] $(basename "${files[$i]}")"
+    done
+
+    read -rp "输入序号: " choice
+    if [[ "$choice" -ge 1 && "$choice" -le "${#files[@]}" ]]; then
+        local target="${files[$((choice-1))]}"
+        mkdir -p /usr/local/etc/xray
+        cp "${target}" "${CONFIG_PATH}"
+        systemctl restart xray
+        echo -e "${GREEN}[成功] 已成功恢复配置并重启 Xray 服务！${NC}"
+    else
+        echo -e "${RED}[错误] 无效选择！${NC}"
+    fi
+}
+
+function uninstall_xray() {
+    read -rp "确定要彻底卸载 Xray 及其所有服务配置吗？[y/N]: " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        systemctl stop xray 2>/dev/null || true
+        systemctl disable xray 2>/dev/null || true
+        
+        # 卸载服务和路径
+        rm -f /etc/systemd/system/xray.service
+        systemctl daemon-reload
+        
+        rm -rf /usr/local/etc/xray
+        rm -rf /usr/local/share/xray
+        rm -rf /usr/local/xray-script
+        rm -rf ~/.xray-script
+        rm -f /usr/bin/xray
+        rm -f /usr/local/bin/xray
+        rm -f /usr/local/bin/xray-info
+        
+        echo -e "${GREEN}[成功] Xray 节点及相关所有脚本已清理完毕！${NC}"
+    else
+        echo -e "${YELLOW}已取消卸载。${NC}"
+    fi
+}
+
+echo -e "${GREEN}=== Xray 独立管理面板 (备份/恢复/卸载) ===${NC}"
+echo " 1. 备份当前 Xray 节点配置"
+echo " 2. 从已有备份中恢复配置"
+echo " 3. 彻底卸载 Xray 及脚本组件"
+echo " 0. 退出"
+read -rp "请选择操作 [0-3]: " opt
+
+case "$opt" in
+    1) backup_config ;;
+    2) restore_config ;;
+    3) uninstall_xray ;;
+    *) exit 0 ;;
+esac
+EOF
+
+chmod +x /usr/local/bin/Uninstall_backup.sh
