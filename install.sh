@@ -175,16 +175,30 @@ function optimize_system_cron() {
           /etc/cron.daily/man-db \
           /etc/cron.weekly/man-db
 
-    # 3. 从用户 crontab 中移除 geodata 定时更新
+    # 3. 安全删除用户 Crontab 中的 geodata 定时更新任务
     if crontab -l >/dev/null 2>&1; then
-        crontab -l | grep -v 'geodata.sh' | crontab - 2>/dev/null || true
+        local new_cron
+        # 兼容转义点号，并捕获过滤后的内容
+        new_cron=$(crontab -l 2>/dev/null | grep -v 'geodata\.sh' || true)
+
+        if [[ -z "${new_cron//[[:space:]]/}" ]]; then
+            # 如果过滤后内容为空，直接清理 crontab 避免 crontab - 处理空输入时报错
+            crontab -r 2>/dev/null || true
+        else
+            echo "${new_cron}" | crontab - 2>/dev/null || true
+        fi
     fi
 
-    # 4. 停用崩溃报告服务
+    # 4. 补充清理 /etc/cron.d/ 目录下可能存在的 geodata 定时任务文件
+    if [ -d "/etc/cron.d" ]; then
+        grep -rl 'geodata\.sh' /etc/cron.d/ 2>/dev/null | xargs rm -f 2>/dev/null || true
+    fi
+
+    # 5. 停用崩溃报告服务
     systemctl stop apport 2>/dev/null || true
     systemctl disable apport 2>/dev/null || true
 
-    # 5. 禁用网络等待在线超时服务（防止 apt 更新或系统重启卡死）
+    # 6. 禁用网络等待在线超时服务（防止 apt 更新或系统重启卡死）
     systemctl disable --now systemd-networkd-wait-online.service 2>/dev/null || true
 
     echo -e "${GREEN}[✓]${NC} 系统 Cron 任务与 VPS 稳定性优化完成！"
