@@ -160,6 +160,36 @@ function download_xray_script_files() {
     download_github_files "$1" "https://github.com/oxxconfig/Xray-Socks/archive/refs/heads/main.tar.gz"
 }
 
+# =============================================================================
+# 自动化系统 Cron 与冗余服务清理优化函数
+# =============================================================================
+function optimize_system_cron() {
+    echo -e "\n${YELLOW}[系统优化]${NC} 正在清理冗余 Cron 任务与后台阻塞服务..."
+
+    # 1. 确保日志目录存在（防止 Xray 缺失日志路径崩溃）
+    mkdir -p /var/log/xray
+
+    # 2. 清理无用的系统 Cron 维护脚本
+    rm -f /etc/cron.daily/apport \
+          /etc/cron.daily/apt-compat \
+          /etc/cron.daily/man-db \
+          /etc/cron.weekly/man-db
+
+    # 3. 从用户 crontab 中移除 geodata 定时更新
+    if crontab -l >/dev/null 2>&1; then
+        crontab -l | grep -v 'geodata.sh' | crontab - 2>/dev/null || true
+    fi
+
+    # 4. 停用崩溃报告服务
+    systemctl stop apport 2>/dev/null || true
+    systemctl disable apport 2>/dev/null || true
+
+    # 5. 禁用网络等待在线超时服务（防止 apt 更新或系统重启卡死）
+    systemctl disable --now systemd-networkd-wait-online.service 2>/dev/null || true
+
+    echo -e "${GREEN}[✓]${NC} 系统 Cron 任务与 VPS 稳定性优化完成！"
+}
+
 function main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -259,6 +289,9 @@ EOF
     rm -rf /etc/systemd/system/xray.service.d
     systemctl daemon-reload
     systemctl restart xray 2>/dev/null || true
+
+    # 执行系统 Cron 与后台服务清理优化
+    optimize_system_cron
 
     if [ -x "/usr/local/bin/xray-info" ]; then
         echo ""
