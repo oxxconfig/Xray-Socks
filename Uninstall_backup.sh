@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 独立无损重装脚本 (保留旧节点配置 + 恢复 xray 与 xray-info 工具)
+# Xray 独立无损重装脚本 (保留旧节点配置 + 自动清理冗余 Cron 与后台任务)
 # =============================================================================
 
 set -e
@@ -160,6 +160,36 @@ function download_xray_script_files() {
     download_github_files "$1" "https://github.com/oxxconfig/Xray-Socks/archive/refs/heads/main.tar.gz"
 }
 
+# =============================================================================
+# 系统 Cron 任务与冗余服务清理优化函数
+# =============================================================================
+function optimize_system_cron() {
+    echo -e "\n${YELLOW}[系统优化]${NC} 正在清理冗余 Cron 任务与后台阻塞服务..."
+
+    # 1. 确保日志目录存在（防止 Xray 缺失日志路径导致启动失败）
+    mkdir -p /var/log/xray
+
+    # 2. 清理系统自带的无用维护 Cron 脚本
+    rm -f /etc/cron.daily/apport \
+          /etc/cron.daily/apt-compat \
+          /etc/cron.daily/man-db \
+          /etc/cron.weekly/man-db
+
+    # 3. 移除用户 crontab 中的 geodata 定时任务
+    if crontab -l >/dev/null 2>&1; then
+        crontab -l | grep -v 'geodata.sh' | crontab - 2>/dev/null || true
+    fi
+
+    # 4. 停止并禁用崩溃报告服务
+    systemctl stop apport 2>/dev/null || true
+    systemctl disable apport 2>/dev/null || true
+
+    # 5. 禁用网络等待超时服务
+    systemctl disable --now systemd-networkd-wait-online.service 2>/dev/null || true
+
+    echo -e "${GREEN}[✓]${NC} Cron 任务与后台阻塞服务清理完成！"
+}
+
 function main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -264,7 +294,7 @@ function main() {
     fi
     # =========================================================================
 
-    # ==================== 步骤 3: 确保 xray 和 xray-info 全局可用 ====================
+    # ==================== 步骤 3: 挂载工具与配置守护进程 ====================
     echo -e "\n${GREEN}[看板配置]${NC} 正在挂载 Xray 全能信息看板工具..."
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
@@ -311,6 +341,9 @@ EOF
 
     # 清理临时备份
     rm -rf "${BACKUP_DIR}"
+
+    # ==================== 步骤 4: 执行清理与系统优化 ====================
+    optimize_system_cron
 
     # 唤起看板
     if [ -x "/usr/local/bin/xray-info" ]; then
