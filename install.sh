@@ -9,9 +9,11 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# 2. 全局环境变量压制
+# 2. 全局环境变量压制 (核心防卡死设置)
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+export UCFR_YES=1
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/snap/bin
 export PATH
 
@@ -44,7 +46,16 @@ function _os() {
 # 优化系统内核与防火墙
 function init_env_optimization() {
     echo -e "${GREEN}[基础配置]${NC} 开始优化系统内核与防火墙规则..."
-    
+
+    # 1. 自动写入 needrestart 配置文件，防止提示弹窗卡住进程
+    if [ -d "/etc/needrestart" ]; then
+        mkdir -p /etc/needrestart/conf.d
+        cat << 'EOF' > /etc/needrestart/conf.d/99-disable-prompt.conf
+$nrconf{restart} = 'a';
+$nrconf{kernelhints} = -1;
+EOF
+    fi
+
     sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
     sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
 
@@ -109,6 +120,11 @@ function install_dependencies() {
             for pkg in "${packages[@]}"; do yum install -y "${pkg}"; done
         fi
     else
+        # 强制清理可能的旧 apt 锁，防止卡死
+        killall apt apt-get dpkg 2>/dev/null || true
+        rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock* 2>/dev/null || true
+        dpkg --configure -a 2>/dev/null || true
+
         apt-get update -y -o Acquire::Retries=3 -o Acquire::http::Timeout=10
         
         local packages=("ca-certificates" "openssl" "curl" "wget" "git" "jq" "tzdata" "qrencode" "socat" "cron" "iproute2" "procps" "dnsutils")
@@ -118,8 +134,13 @@ function install_dependencies() {
             packages+=("bsdmainutils")
         fi
         
+        # 使用完全非交互与防止需求重启的参数
         for pkg in "${packages[@]}"; do
-            apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" "${pkg}"
+            apt-get install -y \
+                -o Dpkg::Options::="--force-confdef" \
+                -o Dpkg::Options::="--force-confold" \
+                -o Dpkg::Use-Pty=0 \
+                "${pkg}"
         done
     fi
 }
@@ -178,11 +199,9 @@ function optimize_system_cron() {
     # 3. 安全删除用户 Crontab 中的 geodata 定时更新任务
     if crontab -l >/dev/null 2>&1; then
         local new_cron
-        # 兼容转义点号，并捕获过滤后的内容
         new_cron=$(crontab -l 2>/dev/null | grep -v 'geodata\.sh' || true)
 
         if [[ -z "${new_cron//[[:space:]]/}" ]]; then
-            # 如果过滤后内容为空，直接清理 crontab 避免 crontab - 处理空输入时报错
             crontab -r 2>/dev/null || true
         else
             echo "${new_cron}" | crontab - 2>/dev/null || true
