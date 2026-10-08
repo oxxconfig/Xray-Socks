@@ -39,6 +39,7 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
         echo -e " 🔹 端口             : ${S5_PORT}"
         echo -e " 🔹 用户名           : ${GREEN}${S5_USER}${NC}"
         echo -e " 🔹 密码             : ${GREEN}${S5_PASS}${NC}"
+        echo -e " 🔹 快捷链接         : socks5://${S5_USER}:${S5_PASS}@${IP}:${S5_PORT}"
         echo -e "------------------------------------------------------"
     fi
 
