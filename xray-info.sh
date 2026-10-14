@@ -110,7 +110,7 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
             udp: true
         }')
 
-    echo -e "${GREEN}    - ${OPENCLASH_LINE}${NC}"
+    echo -e "${GREEN}  - ${OPENCLASH_LINE}${NC}"
     echo -e "------------------------------------------------------\n"
 
 else
