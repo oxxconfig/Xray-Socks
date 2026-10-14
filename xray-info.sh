@@ -5,7 +5,7 @@ cat << 'EOF' > /usr/local/bin/xray-info
 # =============================================================================
 
 # 定义颜色与样式
-GREEN='\033[1;32m'   # 亮绿加粗
+GREEN='\033[1;32m'    # 亮绿加粗
 YELLOW='\033[33m'
 BLUE='\033[36m'
 RED='\033[31m'
@@ -45,17 +45,15 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
     if [ -n "$S5_PORT" ] && [ "$S5_PORT" != "null" ] && [ "$S5_PORT" != "0" ]; then
         echo -e "${YELLOW}[ 🌐 浏览器专用 Socks5 配置 ]${NC}"
         echo -e " 🔹 代理类型 : Socks5"
-        echo -e " 🔹 代理 IP          : ${IP}"
+        echo -e " 🔹 代理 IP         : ${IP}"
         echo -e " 🔹 端口             : ${S5_PORT}"
         echo -e " 🔹 用户名           : ${GREEN}${S5_USER}${NC}"
         echo -e " 🔹 密码             : ${GREEN}${S5_PASS}${NC}"
-        # 快捷链接保持纯文本，避免复制进 ANSI 转义序列导致格式损坏
         echo -e " 🔹 快捷链接         : socks5://${S5_USER}:${S5_PASS}@${IP}:${S5_PORT}"
         echo -e "------------------------------------------------------"
     fi
 
     # ------------------ 2. 提取 VLESS REALITY 配置参数 ------------------
-    # 查找 Vision 所在的 inbound 索引
     inbound_index=$(echo "${XRAY_CONFIG}" | jq -r '([.inbounds[].tag] | index("VLESS-Vision-REALITY")) // 0' 2>/dev/null)
 
     PORT=$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.port // 443" 2>/dev/null)
@@ -71,11 +69,9 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
     SECURITY=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.security? // "reality"' 2>/dev/null)
     PATH_VAL=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.xhttpSettings.path? // empty' 2>/dev/null)
 
-    # 取第 0 个 serverName 和 shortId
     SERVER_NAME=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.realitySettings.serverNames[0]? // "www.leercapitulo.co"' 2>/dev/null)
     SHORT_ID=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.realitySettings.shortIds[0]? // "8e86738553b1b65a"' 2>/dev/null)
 
-    # 如果 SCRIPT_CONFIG 拿到的 publicKey 为空，尝试实时计算兜底
     if [ -z "$PUBKEY" ] || [ "$PUBKEY" = "null" ]; then
         PRIV_KEY=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.realitySettings.privateKey? // empty' 2>/dev/null)
         XRAY_BIN=$(command -v xray || find /usr -name "xray" -type f 2>/dev/null | head -n 1)
@@ -88,9 +84,7 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
     FP="chrome"
     SPX="%2F"
     
-    # URL Encode 节点名称（避免名称中含特殊字符破坏链接格式）
     LINK_NAME=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${TAG}'))" 2>/dev/null || echo "${TAG}")
-    
     VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=${TYPE}&security=${SECURITY}&sni=${SERVER_NAME}&pbk=${PUBKEY}&sid=${SHORT_ID}&spx=${SPX}&fp=${FP}&flow=${FLOW}#${LINK_NAME}"
 
     echo -e "\n------------------ 客户端配置(${TAG}) ------------------"
@@ -117,6 +111,42 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
 
     echo -e "${YELLOW}[ 🚀 核心 VLESS-REALITY 订阅链接 ]${NC}"
     echo -e "${GREEN}${VLESS_LINK}${NC}"
+
+    # ------------------ 4. 适配路由器 OpenClash 单行格式 ------------------
+    echo -e "\n${YELLOW}[ ⚙️ OpenClash 单行节点配置格式 ]${NC}"
+    
+    # 用 jq 动态拼装成与你要求完全一致的单行 JSON 结构
+    OPENCLASH_LINE=$(jq -nc \
+        --arg name "$TAG" \
+        --arg type "$PROTOCOL" \
+        --arg server "$IP" \
+        --argjson port "$PORT" \
+        --arg uuid "$UUID" \
+        --arg flow "$FLOW" \
+        --arg sni "$SERVER_NAME" \
+        --arg pbk "$PUBKEY" \
+        --arg sid "$SHORT_ID" \
+        --arg fp "$FP" \
+        '{
+            name: $name,
+            type: $type,
+            server: $server,
+            port: $port,
+            uuid: $uuid,
+            cipher: "auto",
+            network: "tcp",
+            tls: true,
+            flow: $flow,
+            servername: $sni,
+            "reality-opts": {
+                "public-key": $pbk,
+                "short-id": $sid
+            },
+            "client-fingerprint": $fp,
+            udp: true
+        }')
+
+    echo -e "${GREEN}    - ${OPENCLASH_LINE}${NC}"
     echo -e "------------------------------------------------------\n"
 
 else
