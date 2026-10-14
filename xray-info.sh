@@ -37,38 +37,15 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
     XRAY_CONFIG="$(jq '.' "${XRAY_CONFIG_PATH}" 2>/dev/null)"
     SCRIPT_CONFIG="$(jq '.' "${SCRIPT_CONFIG_PATH}" 2>/dev/null)"
 
-    # ------------------ 1. 顶部：Socks5 明文账单 ------------------
-    S5_PORT=$(echo "${XRAY_CONFIG}" | jq -r '.inbounds[]? | select(.tag=="SOCKS5-INBOUND") | .port' 2>/dev/null | tr -d '"')
-    S5_USER=$(echo "${XRAY_CONFIG}" | jq -r '.inbounds[]? | select(.tag=="SOCKS5-INBOUND") | .settings.accounts[0].user' 2>/dev/null | tr -d '"')
-    S5_PASS=$(echo "${XRAY_CONFIG}" | jq -r '.inbounds[]? | select(.tag=="SOCKS5-INBOUND") | .settings.accounts[0].pass' 2>/dev/null | tr -d '"')
-
-    if [ -n "$S5_PORT" ] && [ "$S5_PORT" != "null" ] && [ "$S5_PORT" != "0" ]; then
-        echo -e "${YELLOW}[ 🌐 浏览器专用 Socks5 配置 ]${NC}"
-        echo -e " 🔹 代理类型 : Socks5"
-        echo -e " 🔹 代理 IP         : ${IP}"
-        echo -e " 🔹 端口             : ${S5_PORT}"
-        echo -e " 🔹 用户名           : ${GREEN}${S5_USER}${NC}"
-        echo -e " 🔹 密码             : ${GREEN}${S5_PASS}${NC}"
-        echo -e " 🔹 快捷链接         : socks5://${S5_USER}:${S5_PASS}@${IP}:${S5_PORT}"
-        echo -e "------------------------------------------------------"
-    fi
-
-    # ------------------ 2. 提取 VLESS REALITY 配置参数 ------------------
+    # ------------------ 提取配置参数 ------------------
     inbound_index=$(echo "${XRAY_CONFIG}" | jq -r '([.inbounds[].tag] | index("VLESS-Vision-REALITY")) // 0' 2>/dev/null)
 
     PORT=$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.port // 443" 2>/dev/null)
     PUBKEY=$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.publicKey // empty" 2>/dev/null)
     TAG=$(echo "${SCRIPT_CONFIG}" | jq -r ".xray.tag // \"VLESS-REALITY\"" 2>/dev/null)
 
-    PROTOCOL=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].protocol? // "vless"' 2>/dev/null)
     UUID=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].id? // empty' 2>/dev/null)
-    PASSWORD=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].password? // empty' 2>/dev/null)
-    SEED=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.kcpSettings.seed? // empty' 2>/dev/null)
-    TYPE=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.network? // "tcp"' 2>/dev/null)
     FLOW=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].settings.clients[0].flow? // "xtls-rprx-vision"' 2>/dev/null)
-    SECURITY=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.security? // "reality"' 2>/dev/null)
-    PATH_VAL=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.xhttpSettings.path? // empty' 2>/dev/null)
-
     SERVER_NAME=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.realitySettings.serverNames[0]? // "www.leercapitulo.co"' 2>/dev/null)
     SHORT_ID=$(echo "${XRAY_CONFIG}" | jq -r --argjson i "${inbound_index}" '.inbounds[$i].streamSettings.realitySettings.shortIds[0]? // "8e86738553b1b65a"' 2>/dev/null)
 
@@ -80,29 +57,20 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
         fi
     fi
 
-    # ------------------ 3. 拼装标准的 VLESS 链接  ------------------
+    # ------------------ 拼装标准的 VLESS 链接 ------------------
     FP="chrome"
     SPX="%2F"
-    
     LINK_NAME=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${TAG}'))" 2>/dev/null || echo "${TAG}")
-    VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=${TYPE}&security=${SECURITY}&sni=${SERVER_NAME}&pbk=${PUBKEY}&sid=${SHORT_ID}&spx=${SPX}&fp=${FP}&flow=${FLOW}#${LINK_NAME}"
+    VLESS_LINK="vless://${UUID}@${IP}:${PORT}?type=tcp&security=reality&sni=${SERVER_NAME}&pbk=${PUBKEY}&sid=${SHORT_ID}&spx=${SPX}&fp=${FP}&flow=${FLOW}#${LINK_NAME}"
 
     echo -e "\n------------------ 客户端配置(${TAG}) ------------------"
     echo -e "address          : ${IP}"
     echo -e "port             : ${PORT}"
-    echo -e "protocol         : ${PROTOCOL}"
     echo -e "uuid             : ${UUID}"
-    echo -e "password(trojan) : ${PASSWORD}"
-    echo -e "seed(mKCP)       : ${SEED}"
     echo -e "flow             : ${FLOW}"
-    echo -e "network          : ${TYPE}"
-    echo -e "security         : ${SECURITY}"
     echo -e "ServerName       : ${SERVER_NAME}"
-    echo -e "path             : ${PATH_VAL}"
-    echo -e "Fingerprint      : chrome"
     echo -e "PublicKey        : ${PUBKEY}"
     echo -e "ShortId          : ${SHORT_ID}"
-    echo -e "SpiderX          : /"
 
     echo -e "\n${YELLOW}[ 📱 手机扫码专用二维码 ]${NC}"
     if command -v qrencode &>/dev/null; then
@@ -112,13 +80,11 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
     echo -e "${YELLOW}[ 🚀 核心 VLESS-REALITY 订阅链接 ]${NC}"
     echo -e "${GREEN}${VLESS_LINK}${NC}"
 
-    # ------------------ 4. 适配路由器 OpenClash 单行格式 ------------------
-    echo -e "\n${YELLOW}[ ⚙️ OpenClash 单行节点配置格式 ]${NC}"
+    # ------------------ 5. 精简版路由器单行格式 ------------------
+    echo -e "\n${YELLOW}[ ⚙️ 路由器精简单行节点格式 ]${NC}"
     
-    # 用 jq 动态拼装成与你要求完全一致的单行 JSON 结构
     OPENCLASH_LINE=$(jq -nc \
         --arg name "$TAG" \
-        --arg type "$PROTOCOL" \
         --arg server "$IP" \
         --argjson port "$PORT" \
         --arg uuid "$UUID" \
@@ -126,14 +92,12 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
         --arg sni "$SERVER_NAME" \
         --arg pbk "$PUBKEY" \
         --arg sid "$SHORT_ID" \
-        --arg fp "$FP" \
         '{
             name: $name,
-            type: $type,
+            type: "vless",
             server: $server,
             port: $port,
             uuid: $uuid,
-            cipher: "auto",
             network: "tcp",
             tls: true,
             flow: $flow,
@@ -142,7 +106,7 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
                 "public-key": $pbk,
                 "short-id": $sid
             },
-            "client-fingerprint": $fp,
+            "client-fingerprint": "chrome",
             udp: true
         }')
 
@@ -153,5 +117,4 @@ else
     echo -e "${RED}[!] 错误: 未找到 Xray 配置文件或缺少 jq 命令。${NC}"
 fi
 EOF
-
 chmod +x /usr/local/bin/xray-info
