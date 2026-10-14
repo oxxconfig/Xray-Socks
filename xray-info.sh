@@ -139,7 +139,7 @@ if [ -f "$XRAY_CONFIG_PATH" ] && [ -f "$SCRIPT_CONFIG_PATH" ] && command -v jq &
             "client-fingerprint": "chrome",
             udp: true
         }')
-    echo -e "${GREEN}    - ${OPENCLASH_LINE}${NC}"
+    echo -e "${GREEN}  - ${OPENCLASH_LINE}${NC}"
 
     echo -e "\n${YELLOW}[ 📱 手机扫码专用二维码 ]${NC}"
     if command -v qrencode &>/dev/null; then
