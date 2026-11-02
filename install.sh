@@ -1,8 +1,7 @@
-
 #!/usr/bin/env bash
 
 # ============================================================
-# Xray-Socks 一键部署脚本
+# Xray-Socks 一键部署脚本 (修复优化版)
 # 支持：--vision / --xhttp / --fallback
 # ============================================================
 
@@ -55,7 +54,10 @@ if ! command -v apt-get >/dev/null 2>&1; then
     error "当前系统不支持 apt-get，仅支持 Debian / Ubuntu 系统。"
 fi
 
-log "基础配置" "正在更新依赖..."
+log "基础配置" "正在清理可能存在的 apt 锁并更新依赖..."
+killall apt apt-get dpkg 2>/dev/null || true
+rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock* 2>/dev/null || true
+dpkg --configure -a 2>/dev/null || true
 
 apt-get update -y || error "apt-get update 执行失败。"
 
@@ -134,7 +136,7 @@ log "下载项目" "正在拉取 Xray-Socks 主脚本..."
 
 PROJECT_URL="https://github.com/oxxconfig/Xray-Socks/archive/refs/heads/main.tar.gz"
 
-curl -fL --connect-timeout 10 --retry 3 \
+curl -sL --connect-timeout 15 --retry 3 \
     "$PROJECT_URL" -o "$TMP_TAR" \
     || error "项目压缩包下载失败。"
 
@@ -180,7 +182,7 @@ log "预备核心" "正在下载官方 Xray 核心..."
 
 XRAY_URL="https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${XRAY_ARCH}.zip"
 
-curl -fL --connect-timeout 10 --retry 3 \
+curl -sL --connect-timeout 15 --retry 3 \
     "$XRAY_URL" -o "$XRAY_TMP/xray.zip" \
     || error "Xray 核心下载失败。"
 
@@ -219,11 +221,9 @@ mkdir -p \
     /usr/local/share/xray \
     || error "创建安装目录失败。"
 
-# -a 保留文件属性，并复制隐藏文件
 cp -a "$ROOT_DIR"/. "$PROJECT_ROOT/" \
     || error "复制项目文件失败。"
 
-# 安装 Xray 核心
 install -m 755 "$XRAY_TMP/xray" /usr/bin/xray \
     || error "安装 Xray 核心失败。"
 
@@ -231,7 +231,7 @@ install -m 755 "$XRAY_TMP/xray" /usr/bin/xray \
     || error "/usr/bin/xray 不存在或不可执行。"
 
 # ------------------------------------------------------------
-# 执行业务配置脚本
+# 执行业务配置脚本 (修复参数传入与标准输入重定向)
 # ------------------------------------------------------------
 
 log "业务脚本" "正在执行配置生成..."
@@ -314,7 +314,7 @@ INFO_TMP="/usr/local/bin/xray-info.tmp"
 
 rm -f "$INFO_TMP"
 
-curl -fSL --connect-timeout 10 --retry 3 \
+curl -sL --connect-timeout 15 --retry 3 \
     -H "Cache-Control: no-cache" \
     "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" \
     -o "$INFO_TMP" \
