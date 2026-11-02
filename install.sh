@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 全自动部署与环境优化脚本 (生产稳健终极修复版 - 补全完整 i18n)
+# Xray 全自动部署与环境优化脚本 (零报错全功能完美修复版)
 # =============================================================================
 
 # 1. 严格权限断言
@@ -77,7 +77,7 @@ function check_dependencies() {
     if [[ "$(_os)" == "centos" ]]; then
         packages+=("crontabs" "util-linux" "iproute" "procps-ng" "bind-utils")
         for pkg in "${packages[@]}"; do
-            rpm -q "$pkg" &>/dev/null \vert{}\vert{} missing=$((missing+1))
+            rpm -q "$pkg" &>/dev/null || missing=$((missing+1))
         done
     else
         if apt-cache show bsdextrautils &>/dev/null; then
@@ -87,7 +87,7 @@ function check_dependencies() {
         fi
 
         for pkg in "${packages[@]}"; do
-            dpkg -s "$pkg" &>/dev/null \vert{}\vert{} missing=$((missing+1))
+            dpkg -s "$pkg" &>/dev/null || missing=$((missing+1))
         done
     fi
 
@@ -262,7 +262,6 @@ function main() {
     mkdir -p "${PROJECT_ROOT}/config/xray" "${PROJECT_ROOT}/i18n"
     echo "{}" > "${PROJECT_ROOT}/config/xray/config.json"
     if ! curl -sL --connect-timeout 10 --retry 3 "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/i18n/zh.json" -o "${PROJECT_ROOT}/i18n/zh.json"; then
-        # 如果断网降级，则写入包含完整最小结构的多级占位，防止 jq 报错崩塌
         echo '{"title":{"error":"错误"},"index":{},"management":{},"config":{},"xray":{},"full":{},"route":{},"sni":{},"language":{}}' > "${PROJECT_ROOT}/i18n/zh.json"
     fi
     ln -sf "${PROJECT_ROOT}/i18n/zh.json" "${PROJECT_ROOT}/i18n/.json" 2>/dev/null || true
@@ -270,7 +269,7 @@ function main() {
     # 提前安装 Xray 核心二进制
     pre_install_xray_binary
 
-    # 提前注册 systemd 服务
+    # 提前注册稳健的 systemd 服务
     cat << 'SERVICE_EOF' > /etc/systemd/system/xray.service
 [Unit]
 Description=Xray Service
@@ -311,4 +310,22 @@ SERVICE_EOF
         bash "${CORE_DIR}/main.sh" </dev/null
     fi
 
-    echo -e "\n${GREEN}[看板配置]${NC}
+    echo -e "\n${GREEN}[看板配置]${NC} 正在挂载 Xray 全能信息看板工具..."
+    curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
+    chmod +x /usr/local/bin/xray-info
+
+    # 生成全局快捷管理命令 `xray`
+    printf '#!/usr/bin/env bash\nif [ -f "/usr/local/xray-script/core/main.sh" ]; then\n    exec bash /usr/local/xray-script/core/main.sh "$@"\nelse\n    echo "错误: 未找到 Xray 管理脚本！"\n    exit 1\nfi\n' > /usr/local/bin/xray
+    chmod +x /usr/local/bin/xray
+
+    systemctl restart xray || true
+
+    optimize_system_cron
+
+    if [ -x "/usr/local/bin/xray-info" ]; then
+        echo ""
+        /usr/local/bin/xray-info
+    fi
+}
+
+main "${ORIGINAL_ARGS[@]}"
