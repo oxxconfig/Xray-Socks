@@ -264,34 +264,6 @@ function processes_xray() {
         # 如果 is_exec 为 'n'，则仅设置版本，然后进入配置流程
         exec_handler '--version' "${version}" # 设置 Xray 版本
         processes_xray_config                 # 进入 Xray 配置流程
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fi
 }
 
