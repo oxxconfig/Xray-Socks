@@ -193,7 +193,24 @@ function main() {
 
     echo -e "${GREEN}[部署完成]${NC} 前置依赖与系统优化已就绪，正在唤起 Xray 主内核业务脚本..."
     echo "--------------------------------------------------------"
-    
+
+    # 【精准补丁】：在唤起主脚本前，提前下载并放置 xray 核心，避免子脚本报 xray: command not found
+    if ! command -v xray &>/dev/null && [ ! -f "/usr/local/bin/xray" ]; then
+        echo -e "${YELLOW}[预备核心]${NC} 正在预先下载官方 Xray 核心..."
+        _xray_tmp="/tmp/xray_install_pre"
+        mkdir -p "${_xray_tmp}"
+        _arch="64"
+        [[ "$(uname -m)" =~ "aarch64"|"arm64" ]] && _arch="arm64-v8a"
+        if curl -sLo "${_xray_tmp}/xray.zip" "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${_arch}.zip"; then
+            unzip -qo "${_xray_tmp}/xray.zip" -d "${_xray_tmp}"
+            if [ -f "${_xray_tmp}/xray" ]; then
+                install -m 755 "${_xray_tmp}/xray" /usr/local/bin/xray
+                ln -sf /usr/local/bin/xray /usr/bin/xray
+            fi
+        fi
+        rm -rf "${_xray_tmp}"
+    fi
+
     if [ -n "${QUICK_INSTALL}" ]; then
         bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}" </dev/null
     else
