@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 全自动部署与环境优化脚本 (完美修复版)
+# Xray 全自动部署与环境优化脚本 (生产稳健终极修复版)
 # =============================================================================
 
 # 1. 严格权限断言
@@ -160,7 +160,7 @@ function download_xray_script_files() {
     download_github_files "$1" "https://github.com/oxxconfig/Xray-Socks/archive/refs/heads/main.tar.gz"
 }
 
-# 预先下载并挂载官方 Xray 核心，解决 generate.sh 找不到 xray 命令的问题
+# 预先下载并挂载官方 Xray 核心
 function pre_install_xray_binary() {
     echo -e "${GREEN}[预备核心]${NC} 正在预先下载官方 Xray 核心到 /usr/bin/xray..."
     local _xray_tmp="/tmp/xray_install_pre"
@@ -258,7 +258,7 @@ function main() {
     # 下载最新脚本
     download_xray_script_files "${PROJECT_ROOT}"
 
-    # 预创建业务脚本可能漏掉的配置占位目录，防止 jq 抛出 No such file 错误
+    # 预创建业务脚本可能漏掉的配置占位目录，防止 jq 抛出错误
     mkdir -p "${PROJECT_ROOT}/config/xray" "${PROJECT_ROOT}/i18n"
     echo "{}" > "${PROJECT_ROOT}/config/xray/config.json"
     echo '{"title":{"error":"错误"}}' > "${PROJECT_ROOT}/i18n/zh.json"
@@ -266,6 +266,35 @@ function main() {
 
     # 提前安装 Xray 核心二进制
     pre_install_xray_binary
+
+    # ==================== 关键修复：提前注册 systemd 服务 ====================
+    cat << 'SERVICE_EOF' > /etc/systemd/system/xray.service
+[Unit]
+Description=Xray Service
+Documentation=https://github.com/xtls
+After=network.target network-online.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+User=root
+ExecStartPre=/usr/bin/xray run -test -config /usr/local/etc/xray/config.json
+ExecStart=/usr/bin/xray run -config /usr/local/etc/xray/config.json
+Restart=on-failure
+RestartSec=5s
+RestartPreventExitStatus=23
+LimitNPROC=10000
+LimitNOFILE=1000000
+RuntimeDirectory=xray
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+    rm -rf /etc/systemd/system/xray.service.d
+    systemctl daemon-reload
+    systemctl enable xray 2>/dev/null || true
+    # ========================================================================
 
     local json_lang
     json_lang=$(jq --arg language "zh" '.language = $language' "${SCRIPT_CONFIG_PATH}" 2>/dev/null)
@@ -288,30 +317,7 @@ function main() {
     printf '#!/usr/bin/env bash\nif [ -f "/usr/local/xray-script/core/main.sh" ]; then\n    exec bash /usr/local/xray-script/core/main.sh "$@"\nelse\n    echo "错误: 未找到 Xray 管理脚本！"\n    exit 1\nfi\n' > /usr/local/bin/xray
     chmod +x /usr/local/bin/xray
 
-    # 服务管理配置
-    cat << 'EOF' > /etc/systemd/system/xray.service
-[Unit]
-Description=Xray Service
-Documentation=https://github.com/xtls
-After=network.target nss-lookup.target
-
-[Service]
-User=root
-ExecStart=/usr/bin/xray run -config /usr/local/etc/xray/config.json
-Restart=on-failure
-RestartPreventExitStatus=23
-LimitNPROC=10000
-LimitNOFILE=1000000
-RuntimeDirectory=xray
-RuntimeDirectoryMode=0755
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    rm -rf /etc/systemd/system/xray.service.d
-    systemctl daemon-reload
-    systemctl enable xray 2>/dev/null || true
+    # 再次显式确保服务启动成功
     systemctl restart xray || true
 
     optimize_system_cron
