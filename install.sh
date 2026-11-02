@@ -7,7 +7,6 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 set -o pipefail
-
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
@@ -28,9 +27,6 @@ error() {
     exit 1
 }
 
-# ------------------------------------------------------------
-# 参数识别
-# ------------------------------------------------------------
 QUICK_INSTALL=""
 for arg in "$@"; do
     case "$arg" in
@@ -40,9 +36,7 @@ for arg in "$@"; do
     esac
 done
 
-# ------------------------------------------------------------
-# 预先初始化脚本配置文件（修复 jq 找不到 config.json 的核心）
-# ------------------------------------------------------------
+# 1. 预先在用户家目录与本地路径同时创建正确的 config.json
 SCRIPT_CONFIG_DIR="${HOME}/.xray-script"
 SCRIPT_CONFIG_PATH="${SCRIPT_CONFIG_DIR}/config.json"
 mkdir -p "${SCRIPT_CONFIG_DIR}"
@@ -54,9 +48,6 @@ cat << 'JSON_EOF' > "${SCRIPT_CONFIG_PATH}"
 }
 JSON_EOF
 
-# ------------------------------------------------------------
-# 基础环境与依赖
-# ------------------------------------------------------------
 log "基础配置" "正在更新依赖..."
 killall apt apt-get dpkg 2>/dev/null || true
 rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock* 2>/dev/null || true
@@ -65,9 +56,6 @@ dpkg --configure -a 2>/dev/null || true
 apt-get update -y || error "apt-get update 执行失败。"
 apt-get install -y ca-certificates openssl curl wget git jq tzdata qrencode socat cron iproute2 procps dnsutils unzip tar || error "依赖安装失败。"
 
-# ------------------------------------------------------------
-# BBR 配置
-# ------------------------------------------------------------
 log "基础配置" "正在配置 BBR..."
 SYSCTL_FILE="/etc/sysctl.conf"
 touch "$SYSCTL_FILE" || error "无法写入 $SYSCTL_FILE"
@@ -79,9 +67,6 @@ net.ipv4.tcp_congestion_control=bbr
 SYSCTL_EOF
 sysctl -p >/dev/null 2>&1 || true
 
-# ------------------------------------------------------------
-# 防火墙放行 443
-# ------------------------------------------------------------
 if command -v iptables >/dev/null 2>&1; then
     if ! iptables -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null; then
         iptables -I INPUT -p tcp --dport 443 -j ACCEPT || error "iptables 添加 443 放行规则失败。"
@@ -89,9 +74,6 @@ if command -v iptables >/dev/null 2>&1; then
     iptables-save > /etc/iptables.rules 2>/dev/null || true
 fi
 
-# ------------------------------------------------------------
-# 下载并部署主项目
-# ------------------------------------------------------------
 PROJECT_ROOT="/usr/local/xray-script"
 CORE_DIR="${PROJECT_ROOT}/core"
 TMP_ROOT="/tmp/xray_deploy_temp"
@@ -111,9 +93,6 @@ tar -xzf "$TMP_TAR" -C "$TMP_EXTRACT" --no-same-owner || error "项目压缩包�
 ROOT_DIR=$(find "$TMP_EXTRACT" -mindepth 1 -maxdepth 1 -type d | head -n 1)
 [ -n "$ROOT_DIR" ] && [ -d "$ROOT_DIR" ] || error "未找到项目目录。"
 
-# ------------------------------------------------------------
-# 自动识别架构并预下载官方 Xray 核心
-# ------------------------------------------------------------
 ARCH=$(uname -m)
 case "$ARCH" in
     x86_64|amd64) XRAY_ARCH="64" ;;
@@ -127,20 +106,24 @@ curl -sL --connect-timeout 15 --retry 3 "$XRAY_URL" -o "$XRAY_TMP/xray.zip" || e
 unzip -qo "$XRAY_TMP/xray.zip" -d "$XRAY_TMP" || error "Xray 核心解压失败。"
 chmod 755 "$XRAY_TMP/xray"
 
-# ------------------------------------------------------------
-# 纯净重建与安装
-# ------------------------------------------------------------
 log "纯净重建" "正在清理旧配置与旧脚本..."
 systemctl stop xray 2>/dev/null || true
 rm -rf "$PROJECT_ROOT" /usr/local/etc/xray /usr/local/share/xray
 mkdir -p "$PROJECT_ROOT" /usr/local/etc/xray /usr/local/share/xray
 
 cp -a "$ROOT_DIR"/. "$PROJECT_ROOT/" || error "复制项目文件失败。"
+
+# 强制补全防止 i18n 语言文件缺失
+mkdir -p "${PROJECT_ROOT}/i18n"
+cat << 'I18N_EOF' > "${PROJECT_ROOT}/i18n/zh.json"
+{
+  "welcome": "欢迎使用"
+}
+I18N_EOF
+ln -sf "${PROJECT_ROOT}/i18n/zh.json" "${PROJECT_ROOT}/i18n/.json" 2>/dev/null || true
+
 install -m 755 "$XRAY_TMP/xray" /usr/bin/xray || error "安装 Xray 核心失败。"
 
-# ------------------------------------------------------------
-# 执行业务配置脚本
-# ------------------------------------------------------------
 log "业务脚本" "正在执行配置生成..."
 if [ -n "$QUICK_INSTALL" ]; then
     bash "$CORE_DIR/main.sh" "$QUICK_INSTALL" </dev/null || error "业务脚本执行失败：$QUICK_INSTALL"
@@ -148,9 +131,6 @@ else
     bash "$CORE_DIR/main.sh" </dev/null || error "业务脚本执行失败。"
 fi
 
-# ------------------------------------------------------------
-# 验证配置并注册 systemd 服务
-# ------------------------------------------------------------
 CONFIG_FILE="/usr/local/etc/xray/config.json"
 [ -s "$CONFIG_FILE" ] || error "配置文件不存在或为空：$CONFIG_FILE"
 
@@ -179,9 +159,6 @@ systemctl daemon-reload
 systemctl enable xray
 systemctl restart xray || error "Xray 服务启动失败。"
 
-# ------------------------------------------------------------
-# 挂载 xray-info 看板并清理
-# ------------------------------------------------------------
 log "看板挂载" "正在配置 xray-info..."
 curl -sL --connect-timeout 15 --retry 3 "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" -o /usr/local/bin/xray-info
 chmod 755 /usr/local/bin/xray-info
