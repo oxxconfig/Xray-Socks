@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 全自动部署脚本 (Debian 纯净适配版)
+# Xray 全自动部署与环境优化脚本 (Debian / Ubuntu 双系统兼容完美版)
 # =============================================================================
 
 # 1. 严格权限断言
@@ -9,7 +9,7 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# 2. 全局环境变量压制 (防卡死设置)
+# 2. 全局环境变量压制 (核心防卡死设置)
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 export NEEDRESTART_SUSPEND=1
@@ -31,11 +31,21 @@ declare PROJECT_ROOT=''
 declare CORE_DIR=''
 declare QUICK_INSTALL=''
 
+function _os() {
+    if [[ -f "/etc/debian_version" ]]; then
+        local os_id
+        os_id=$(grep -oP '^ID=\K\w+' /etc/os-release 2>/dev/null || echo "ubuntu")
+        printf -- "%s" "${os_id}"
+        return
+    fi
+    [[ -f "/etc/redhat-release" ]] && printf -- "centos" && return
+    printf -- "ubuntu"
+}
+
 # 优化系统内核与防火墙
 function init_env_optimization() {
-    echo -e "${GREEN}[基础配置]${NC} 开始优化 Debian 系统内核与防火墙规则..."
+    echo -e "${GREEN}[基础配置]${NC} 开始优化系统内核与防火墙规则..."
 
-    # 针对 Debian 配置 needrestart 静默
     if [ -d "/etc/needrestart" ]; then
         mkdir -p /etc/needrestart/conf.d
         cat << 'EOF' > /etc/needrestart/conf.d/99-disable-prompt.conf
@@ -67,14 +77,15 @@ EOF
 }
 
 function install_dependencies() {
-    echo -e "${YELLOW}[基础配置]${NC} 正在清理 Debian apt 锁并安装依赖..."
+    echo -e "${YELLOW}[基础配置]${NC} 正在清理 apt 锁并安装必要依赖(含 unzip)..."
     killall apt apt-get dpkg 2>/dev/null || true
     rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock* 2>/dev/null || true
     dpkg --configure -a 2>/dev/null || true
 
     apt-get update -y -o Acquire::Retries=3 -o Acquire::http::Timeout=10
     
-    local packages=("ca-certificates" "openssl" "curl" "wget" "git" "jq" "tzdata" "qrencode" "socat" "cron" "iproute2" "procps" "dnsutils")
+    # 强制在列表中包含 unzip，解决 Debian / Ubuntu 缺少解压工具导致核心无法安装的问题
+    local packages=("ca-certificates" "openssl" "curl" "wget" "git" "jq" "tzdata" "qrencode" "socat" "cron" "iproute2" "procps" "dnsutils" "unzip")
     if apt-cache show bsdextrautils &>/dev/null; then
         packages+=("bsdextrautils")
     else
@@ -194,12 +205,12 @@ function main() {
     echo -e "${GREEN}[部署完成]${NC} 前置依赖与系统优化已就绪，正在唤起 Xray 主内核业务脚本..."
     echo "--------------------------------------------------------"
 
-    # 【精准补丁】：在唤起主脚本前，提前下载并放置 xray 核心，避免子脚本报 xray: command not found
+    # 【精准修复】：提前在主脚本中安全下载解压官方核心，杜绝 xray: command not found
     if ! command -v xray &>/dev/null && [ ! -f "/usr/local/bin/xray" ]; then
         echo -e "${YELLOW}[预备核心]${NC} 正在预先下载官方 Xray 核心..."
-        _xray_tmp="/tmp/xray_install_pre"
+        local _xray_tmp="/tmp/xray_install_pre"
         mkdir -p "${_xray_tmp}"
-        _arch="64"
+        local _arch="64"
         [[ "$(uname -m)" =~ "aarch64"|"arm64" ]] && _arch="arm64-v8a"
         if curl -sLo "${_xray_tmp}/xray.zip" "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${_arch}.zip"; then
             unzip -qo "${_xray_tmp}/xray.zip" -d "${_xray_tmp}"
@@ -211,6 +222,7 @@ function main() {
         rm -rf "${_xray_tmp}"
     fi
 
+    # 【精准修复】：严格防空及规范传递参数，杜绝 @: unknown option -- - 报错
     if [ -n "${QUICK_INSTALL}" ]; then
         bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}" </dev/null
     else
@@ -221,7 +233,6 @@ function main() {
     curl -sS -H "Cache-Control: no-cache" -L "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" > /usr/local/bin/xray-info 2>/dev/null
     chmod +x /usr/local/bin/xray-info
 
-    # 确保 xray 主程序全局软链接可用（解决公钥计算时的 xray: command not found）
     if [ -f "/usr/local/bin/xray" ]; then
         ln -sf /usr/local/bin/xray /usr/bin/xray
     fi
