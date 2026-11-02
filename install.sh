@@ -4,107 +4,64 @@ if [ "$EUID" -ne 0 ]; then
     echo -e "\033[31m[错误] 请使用 root 用户运行此脚本！\033[0m"
     exit 1
 fi
-export DEBIAN_FRONTEND=noninteractive
-export NEEDRESTART_MODE=a
-PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/snap/bin
-export PATH
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/snap/bin
 ORIGINAL_ARGS=("$@")
-readonly GREEN='\033[32m'
-readonly YELLOW='\033[33m'
-readonly RED='\033[31m'
-readonly NC='\033[0m'
-readonly SCRIPT_CONFIG_DIR="${HOME}/.xray-script"
-readonly SCRIPT_CONFIG_PATH="${SCRIPT_CONFIG_DIR}/config.json"
-declare PROJECT_ROOT=''
-declare CORE_DIR=''
-declare QUICK_INSTALL=''
 
-function init_env_optimization() {
-    echo -e "${GREEN}[基础配置]${NC} 正在优化系统内核与防火墙..."
-    sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
-    sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
-    grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf || echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
-    grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf || echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-    sysctl -p >/dev/null 2>&1
-    if type iptables >/dev/null 2>&1; then
-        if ! iptables -L INPUT -n 2>/dev/null | grep -q "dpt:443"; then
-            iptables -I INPUT -p tcp --dport 443 -j ACCEPT
-            iptables-save > /etc/iptables.rules 2>/dev/null || true
-        fi
-    fi
-}
+GREEN='\033[32m'
+YELLOW='\033[33m'
+RED='\033[31m'
+NC='\033[0m'
 
-function install_dependencies() {
-    echo -e "${YELLOW}[基础配置]${NC} 正在更新依赖 (含 unzip)..."
-    killall apt apt-get dpkg 2>/dev/null || true
-    rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock* 2>/dev/null || true
-    dpkg --configure -a 2>/dev/null || true
-    apt-get update -y -o Acquire::Retries=3 -o Acquire::http::Timeout=10
-    local packages=("ca-certificates" "openssl" "curl" "wget" "git" "jq" "tzdata" "qrencode" "socat" "cron" "iproute2" "procps" "dnsutils" "unzip")
-    if apt-cache show bsdextrautils &>/dev/null; then
-        packages+=("bsdextrautils")
-    else
-        packages+=("bsdmainutils")
-    fi
-    for pkg in "${packages[@]}"; do
-        apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" "${pkg}"
-    done
-}
+echo -e "${GREEN}[1/5] 正在优化系统内核与防火墙...${NC}"
+sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
+sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
+grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf || echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf || echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+sysctl -p
+if type iptables >/dev/null 2>&1; then
+    iptables -I INPUT -p tcp --dport 443 -j ACCEPT
+    iptables-save > /etc/iptables.rules 2>/dev/null || true
+fi
 
-function download_github_files() {
-    local target_dir="$1"
-    local github_api_url="$2"
-    mkdir -p "${target_dir}"
-    local tmp_tar="/tmp/xray_deploy_temp.tar.gz"
-    local tmp_dir="/tmp/xray_deploy_extract"
-    rm -rf "${tmp_tar}" "${tmp_dir}"
-    curl -sLo "${tmp_tar}" "${github_api_url}" || exit 1
-    mkdir -p "${tmp_dir}"
-    tar -xzf "${tmp_tar}" -C "${tmp_dir}" --no-same-owner 2>/dev/null
-    local root_dir
-    root_dir=$(find "${tmp_dir}" -maxdepth 1 -mindepth 1 -type d | head -n 1)
-    if [[ -n "${root_dir}" && -d "${root_dir}" ]]; then
-        cp -rf "${root_dir}"/* "${target_dir}/"
-    fi
-    rm -rf "${tmp_tar}" "${tmp_dir}"
-}
+echo -e "${GREEN}[2/5] 正在更新系统依赖 (含 unzip)...${NC}"
+apt-get update -y
+apt-get install -y ca-certificates openssl curl wget git jq tzdata qrencode socat cron iproute2 procps dnsutils unzip
 
-function main() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-        --vision | --xhttp | --fallback) QUICK_INSTALL="${1}" ;;
-        -d) shift; PROJECT_ROOT="${1}" ;;
-        esac
-        shift
-    done
-    init_env_optimization
-    install_dependencies
-    mkdir -p "${SCRIPT_CONFIG_DIR}"
-    echo '{"version":"2026.03.17","language":"zh","path":"/usr/local/xray-script"}' > "${SCRIPT_CONFIG_PATH}"
-    PROJECT_ROOT='/usr/local/xray-script'
-    CORE_DIR="${PROJECT_ROOT}/core"
-    systemctl stop xray 2>/dev/null || true
-    rm -rf "${PROJECT_ROOT}" /usr/local/etc/xray /usr/local/share/xray
-    mkdir -p /usr/local/etc/xray /usr/local/share/xray
-    download_github_files "${PROJECT_ROOT}" "https://github.com/oxxconfig/Xray-Socks/archive/refs/heads/main.tar.gz"
-    
-    local _xray_tmp="/tmp/xray_install_pre"
-    mkdir -p "${_xray_tmp}"
-    local _arch="64"
-    [[ "$(uname -m)" =~ "aarch64"|"arm64" ]] && _arch="arm64-v8a"
-    if curl -sLo "${_xray_tmp}/xray.zip" "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${_arch}.zip"; then
-        unzip -qo "${_xray_tmp}/xray.zip" -d "${_xray_tmp}"
-        [ -f "${_xray_tmp}/xray" ] && install -m 755 "${_xray_tmp}/xray" /usr/bin/xray
-    fi
-    rm -rf "${_xray_tmp}"
+echo -e "${GREEN}[3/5] 正在清理旧目录并拉取主脚本...${NC}"
+PROJECT_ROOT='/usr/local/xray-script'
+systemctl stop xray 2>/dev/null || true
+rm -rf "${PROJECT_ROOT}" /usr/local/etc/xray /usr/local/share/xray
+mkdir -p "${PROJECT_ROOT}" /usr/local/etc/xray /usr/local/share/xray
 
-    if [ -n "${QUICK_INSTALL}" ]; then
-        bash "${CORE_DIR}/main.sh" "${QUICK_INSTALL}" </dev/null
-    else
-        bash "${CORE_DIR}/main.sh" </dev/null
-    fi
+tmp_tar="/tmp/xray_deploy_temp.tar.gz"
+tmp_dir="/tmp/xray_deploy_extract"
+curl -Lo "${tmp_tar}" "https://github.com/oxxconfig/Xray-Socks/archive/refs/heads/main.tar.gz"
+mkdir -p "${tmp_dir}"
+tar -xzf "${tmp_tar}" -C "${tmp_dir}"
+root_dir=$(find "${tmp_dir}" -maxdepth 1 -mindepth 1 -type d | head -n 1)
+[[ -n "${root_dir}" && -d "${root_dir}" ]] && cp -rf "${root_dir}"/* "${PROJECT_ROOT}/"
+rm -rf "${tmp_tar}" "${tmp_dir}"
 
-    cat << 'SERVICE_EOF' > /etc/systemd/system/xray.service
+echo -e "${GREEN}[4/5] 正在预下载官方 Xray 核心以计算公钥...${NC}"
+_xray_tmp="/tmp/xray_install_pre"
+mkdir -p "${_xray_tmp}"
+_arch="64"
+[[ "$(uname -m)" =~ "aarch64"|"arm64" ]] && _arch="arm64-v8a"
+curl -Lo "${_xray_tmp}/xray.zip" "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${_arch}.zip"
+unzip -o "${_xray_tmp}/xray.zip" -d "${_xray_tmp}"
+[ -f "${_xray_tmp}/xray" ] && install -m 755 "${_xray_tmp}/xray" /usr/bin/xray
+rm -rf "${_xray_tmp}"
+
+echo -e "${GREEN}[5/5] 正在执行 Xray 主内核业务配置与服务注册...${NC}"
+CORE_DIR="${PROJECT_ROOT}/core"
+if [ -n "$1" ]; then
+    bash "${CORE_DIR}/main.sh" "$1"
+else
+    bash "${CORE_DIR}/main.sh"
+fi
+
+cat << 'SERVICE_EOF' > /etc/systemd/system/xray.service
 [Unit]
 Description=Xray Service
 Documentation=https://github.com/xtls
@@ -124,12 +81,13 @@ RuntimeDirectoryMode=0755
 WantedBy=multi-user.target
 SERVICE_EOF
 
-    systemctl daemon-reload
-    systemctl enable xray 2>/dev/null || true
-    systemctl restart xray 2>/dev/null || true
-    [ -x "/usr/local/bin/xray-info" ] && /usr/local/bin/xray-info
-}
-main "${ORIGINAL_ARGS[@]}"
+systemctl daemon-reload
+systemctl enable xray
+systemctl restart xray
+
+if [ -x "/usr/local/bin/xray-info" ]; then
+    /usr/local/bin/xray-info
+fi
 EOF
 
 bash install.sh --vision
