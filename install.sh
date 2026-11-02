@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 全自动部署与环境优化脚本 (零报错全功能完美修复版)
+# Xray 全自动部署与环境优化脚本 (生产环境稳定版 - 已锁定 v26.3.27)
 # =============================================================================
 
 # 1. 严格权限断言
@@ -160,17 +160,26 @@ function download_xray_script_files() {
     download_github_files "$1" "https://github.com/oxxconfig/Xray-Socks/archive/refs/heads/main.tar.gz"
 }
 
-# 预先下载并挂载官方 Xray 核心
+# 【核心修复】：强行锁定并下载 v26.3.27 稳定内核
 function pre_install_xray_binary() {
-    echo -e "${GREEN}[预备核心]${NC} 正在预先下载官方 Xray 核心到 /usr/bin/xray..."
+    local XRAY_VERSION="v26.3.27"
+    echo -e "${GREEN}[预备核心]${NC} 正在下载与旧 VPS 完全对齐的经典稳定版 Xray 核心 (${XRAY_VERSION})..."
     local _xray_tmp="/tmp/xray_install_pre"
     mkdir -p "${_xray_tmp}"
     local _arch="64"
     [[ "$(uname -m)" =~ "aarch64"|"arm64" ]] && _arch="arm64-v8a"
     
-    if curl -sLo "${_xray_tmp}/xray.zip" "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${_arch}.zip"; then
+    if curl -sLo "${_xray_tmp}/xray.zip" "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-${_arch}.zip"; then
         unzip -qo "${_xray_tmp}/xray.zip" -d "${_xray_tmp}"
-        [ -f "${_xray_tmp}/xray" ] && install -m 755 "${_xray_tmp}/xray" /usr/bin/xray
+        if [ -f "${_xray_tmp}/xray" ]; then
+            install -m 755 "${_xray_tmp}/xray" /usr/local/bin/xray
+            ln -sf /usr/local/bin/xray /usr/bin/xray
+            echo -e "${GREEN}[✓]${NC} Xray 核心 ${XRAY_VERSION} 安装成功！"
+        else
+            echo -e "${RED}[错误]${NC} 解压后未找到 xray 可执行文件！"
+        fi
+    else
+        echo -e "${RED}[错误]${NC} 下载 Xray 核心 ${XRAY_VERSION} 失败！"
     fi
     rm -rf "${_xray_tmp}"
 }
@@ -258,7 +267,7 @@ function main() {
     # 下载最新脚本
     download_xray_script_files "${PROJECT_ROOT}"
 
-    # 【核心修复】：直接从远程仓库拉取合法的完整 zh.json 语言包，彻底解决菜单显示 null 的问题
+    # 拉取完整的 zh.json 语言包
     mkdir -p "${PROJECT_ROOT}/config/xray" "${PROJECT_ROOT}/i18n"
     echo "{}" > "${PROJECT_ROOT}/config/xray/config.json"
     if ! curl -sL --connect-timeout 10 --retry 3 "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/i18n/zh.json" -o "${PROJECT_ROOT}/i18n/zh.json"; then
@@ -266,10 +275,10 @@ function main() {
     fi
     ln -sf "${PROJECT_ROOT}/i18n/zh.json" "${PROJECT_ROOT}/i18n/.json" 2>/dev/null || true
 
-    # 提前安装 Xray 核心二进制
+    # 安装锁定的 v26.3.27 核心
     pre_install_xray_binary
 
-    # 提前注册稳健的 systemd 服务
+    # 注册 systemd 服务
     cat << 'SERVICE_EOF' > /etc/systemd/system/xray.service
 [Unit]
 Description=Xray Service
@@ -279,8 +288,8 @@ Wants=network-online.target
 
 [Service]
 User=root
-ExecStartPre=/usr/bin/xray run -test -config /usr/local/etc/xray/config.json
-ExecStart=/usr/bin/xray run -config /usr/local/etc/xray/config.json
+ExecStartPre=/usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
+ExecStart=/usr/local/bin/xray run -config /usr/local/etc/xray/config.json
 Restart=on-failure
 RestartSec=5s
 RestartPreventExitStatus=23
