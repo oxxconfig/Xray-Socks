@@ -52,4 +52,72 @@ rm -rf "${tmp_tar}" "${tmp_dir}"
 curl -sL --connect-timeout 15 --retry 3 "https://github.com/oxxconfig/Xray-Socks/archive/refs/heads/main.tar.gz" -o "${tmp_tar}"
 mkdir -p "${tmp_dir}"
 tar -xzf "${tmp_tar}" -C "${tmp_dir}" --no-same-owner 2>/dev/null
-root_dir=$(find "${tmp_dir}" -
+root_dir=$(find "${tmp_dir}" -maxdepth 1 -mindepth 1 -type d | head -n 1)
+[[ -n "${root_dir}" && -d "${root_dir}" ]] && cp -rf "${root_dir}"/* "${PROJECT_ROOT}/"
+rm -rf "${tmp_tar}" "${tmp_dir}"
+
+# 严格补全远端容易缺失的配置与语言映射文件，彻底杜绝 jq 空路径报错
+mkdir -p "${PROJECT_ROOT}/config/xray" "${PROJECT_ROOT}/i18n"
+cat << 'JSON_EOF' > "${PROJECT_ROOT}/config/xray/vision.json"
+{}
+JSON_EOF
+cat << 'JSON_EOF' > "${PROJECT_ROOT}/i18n/zh.json"
+{
+  "title": { "error": "错误" }
+}
+JSON_EOF
+ln -sf "${PROJECT_ROOT}/i18n/zh.json" "${PROJECT_ROOT}/i18n/.json" 2>/dev/null || true
+
+echo -e "${GREEN}[4/5] 正在预下载官方 Xray 核心...${NC}"
+_xray_tmp="/tmp/xray_install_pre"
+mkdir -p "${_xray_tmp}"
+_arch="64"
+[[ "$(uname -m)" =~ "aarch64"|"arm64" ]] && _arch="arm64-v8a"
+if curl -sL --connect-timeout 15 --retry 3 "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${_arch}.zip" -o "${_xray_tmp}/xray.zip"; then
+    unzip -qo "${_xray_tmp}/xray.zip" -d "${_xray_tmp}"
+    [ -f "${_xray_tmp}/xray" ] && install -m 755 "${_xray_tmp}/xray" /usr/bin/xray
+fi
+rm -rf "${_xray_tmp}"
+
+echo -e "${GREEN}[5/5] 正在执行业务配置并注册服务...${NC}"
+CORE_DIR="${PROJECT_ROOT}/core"
+if [ -n "$QUICK_INSTALL" ]; then
+    bash "${CORE_DIR}/main.sh" "$QUICK_INSTALL" </dev/null
+else
+    bash "${CORE_DIR}/main.sh" </dev/null
+fi
+
+cat << 'SERVICE_EOF' > /etc/systemd/system/xray.service
+[Unit]
+Description=Xray Service
+Documentation=https://github.com/xtls
+After=network.target nss-lookup.target
+
+[Service]
+User=root
+ExecStart=/usr/bin/xray run -config /usr/local/etc/xray/config.json
+Restart=on-failure
+RestartPreventExitStatus=23
+LimitNPROC=10000
+LimitNOFILE=1000000
+RuntimeDirectory=xray
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+systemctl daemon-reload
+systemctl enable xray 2>/dev/null || true
+systemctl restart xray || true
+
+curl -sL --connect-timeout 15 --retry 3 "https://raw.githubusercontent.com/oxxconfig/Xray-Socks/main/xray-info.sh" -o /usr/local/bin/xray-info 2>/dev/null
+chmod +x /usr/local/bin/xray-info
+
+if [ -x "/usr/local/bin/xray-info" ]; then
+    echo ""
+    /usr/local/bin/xray-info
+fi
+EOF
+
+bash install.sh --vision
