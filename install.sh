@@ -36,7 +36,6 @@ for arg in "$@"; do
     esac
 done
 
-# 1. 预先在用户家目录与本地路径同时创建正确的 config.json
 SCRIPT_CONFIG_DIR="${HOME}/.xray-script"
 SCRIPT_CONFIG_PATH="${SCRIPT_CONFIG_DIR}/config.json"
 mkdir -p "${SCRIPT_CONFIG_DIR}"
@@ -113,13 +112,11 @@ mkdir -p "$PROJECT_ROOT" /usr/local/etc/xray /usr/local/share/xray
 
 cp -a "$ROOT_DIR"/. "$PROJECT_ROOT/" || error "复制项目文件失败。"
 
-# 强制补全防止 i18n 语言文件缺失
+# 完美补齐占位目录，防止远端 main.sh 读取 config/xray/.json 爆 null
+mkdir -p "${PROJECT_ROOT}/config/xray"
+echo "{}" > "${PROJECT_ROOT}/config/xray/config.json"
 mkdir -p "${PROJECT_ROOT}/i18n"
-cat << 'I18N_EOF' > "${PROJECT_ROOT}/i18n/zh.json"
-{
-  "welcome": "欢迎使用"
-}
-I18N_EOF
+echo "{}" > "${PROJECT_ROOT}/i18n/zh.json"
 ln -sf "${PROJECT_ROOT}/i18n/zh.json" "${PROJECT_ROOT}/i18n/.json" 2>/dev/null || true
 
 install -m 755 "$XRAY_TMP/xray" /usr/bin/xray || error "安装 Xray 核心失败。"
@@ -171,4 +168,5 @@ if [ -x "/usr/local/bin/xray-info" ]; then
 fi
 EOF
 
+# 重点：这里执行的是本地写出来的 install.sh 文件，而不是远程管道符！
 bash install.sh --vision
