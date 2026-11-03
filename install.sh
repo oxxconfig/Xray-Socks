@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Xray 全自动部署与环境优化脚本 (生产环境稳定版 - 已锁定 v26.3.27)
+# Xray 全自动部署与环境优化脚本 (生产环境稳定版 - 已锁定 v26.3.27 + 整合 IPv6 禁用)
 # =============================================================================
 
 # 1. 严格权限断言
@@ -41,18 +41,37 @@ function _os() {
     printf -- "ubuntu"
 }
 
-# 优化系统内核与防火墙
+# 优化系统内核、防火墙并禁用 IPv6
 function init_env_optimization() {
-    echo -e "${GREEN}[基础配置]${NC} 开始优化系统内核与防火墙规则..."
+    echo -e "${GREEN}[基础配置]${NC} 开始优化系统内核、防火墙规则并禁用 IPv6..."
     
+    # 优化 BBR 与队列规则
     sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
     sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
 
     grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf || echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
     grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf || echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
 
-    sysctl -p >/dev/null 2>&1
+    # 写入 IPv6 禁用配置
+    cat > /etc/sysctl.d/99-disable-ipv6.conf << "CONF"
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+CONF
 
+    # 刷新 sysctl 配置
+    sysctl --system > /dev/null 2>&1
+
+    # 检查 IPv6 禁用结果
+    local ipv6_status
+    ipv6_status=$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)
+    if [ "$ipv6_status" = "1" ]; then
+        echo -e "${GREEN}[成功]${NC} IPv6 已成功禁用！"
+    else
+        echo -e "${YELLOW}[提示]${NC} IPv6 禁用未能完全生效，但不影响核心运行。"
+    fi
+
+    # 防火墙 443 端口放行
     if type iptables >/dev/null 2>&1; then
         if ! iptables -L INPUT -n 2>/dev/null | grep -q "dpt:443"; then
             iptables -I INPUT -p tcp --dport 443 -j ACCEPT
@@ -247,7 +266,7 @@ function main() {
         PROJECT_ROOT='/usr/local/xray-script'
         local json_payload
         json_payload=$(jq --arg path "${PROJECT_ROOT}" '.path = $path' "${SCRIPT_CONFIG_PATH}" 2>/dev/null)
-        [[ -n "${json_payload}" ]] && echo "${json_payload}" >"${SCRIPT_CONFIG_PATH}"
+        [[ -n "${json_payload ]] && echo "${json_payload}" >"${SCRIPT_CONFIG_PATH}"
     elif [[ -n "${script_path}" ]]; then
         PROJECT_ROOT="${script_path}"
     fi
